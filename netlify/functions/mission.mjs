@@ -11,6 +11,7 @@ const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return n
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{32}$/.test(id);
 const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
+const readEnv=name=>globalThis.Netlify?.env?.get(name)||process.env[name];
 const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
@@ -19,20 +20,20 @@ export default async function handler(request){
  if(request.method==='GET')return json({status:'ok',service:'hns-mission',version:'github-initial'});
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
  if(Number(request.headers.get('content-length')||0)>250000)return fail('Requête trop volumineuse',413);
- const secret=process.env.HNS_SESSION_SECRET;
+ const secret=readEnv('HNS_SESSION_SECRET');
  if(!secret||secret.length<32){console.error('HNS_CONFIGURATION_INVALID HNS_SESSION_SECRET');return fail('Configuration de session indisponible',503,'SESSION_NOT_CONFIGURED')}
  let body;
  try{body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw Error('invalid');if(JSON.stringify(body).length>200000)return fail('Requête trop volumineuse',413)}catch{return fail('Corps JSON invalide',400)}
  const action=body.action;
  const loginRoles={'admin-login':'admin','rh-login':'rh','jury-login':'jury'};
  if(Object.hasOwn(loginRoles,action)){
-  const role=loginRoles[action],key=process.env[env[role]];
-  if(!key||key.length<16){console.error('HNS_CONFIGURATION_INVALID '+env[role]);return fail('Accès '+role+' non configuré',503,'ROLE_NOT_CONFIGURED')}
+  const role=loginRoles[action],key=readEnv(env[role]);
+  if(!key||key.length<8){console.error('HNS_CONFIGURATION_INVALID '+env[role]);return fail('Accès '+role+' non configuré',503,'ROLE_NOT_CONFIGURED')}
   if(typeof body.password!=='string'||!equal(body.password,key))return fail('Identifiants incorrects',401,'INVALID_CREDENTIALS');
   return json({role,token:sign({role,exp:Date.now()+4*60*60*1000},secret)});
  }
- const db=store();
  try{
+ const db=store();
   if(action==='participant-login'){
    const code=within(body.code,80).toUpperCase();
    if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide',401);
