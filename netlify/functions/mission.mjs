@@ -56,6 +56,28 @@ export default async function handler(request){
    const people=await listParticipants(db);
    return json({participants:people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}))});
   }
+  if(action==='sync-recruitment'){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   const recruitmentKey=readEnv('HNS_RECRUITMENT_KEY');
+   if(!recruitmentKey)return fail('Connexion recrutement non configurée',503);
+   const response=await fetch('https://ai.hns.ma/.netlify/functions/candidates-admin',{headers:{Authorization:'Bearer '+recruitmentKey},redirect:'error',signal:AbortSignal.timeout(15000)});
+   if(!response.ok)return fail('Source recrutement indisponible',502);
+   const payload=await response.json();
+   const rows=Array.isArray(payload)?payload:payload.records||payload.candidates||payload.items;
+   if(!Array.isArray(rows))return fail('Format recrutement inconnu',502);
+   let created=0,existing=0;
+   for(const row of rows){
+    if(!['selected','invited','confirmed'].includes(row.status))continue;
+    const candidateId=within(row.id,160),alias=within(row.name,70);
+    if(!candidateId||!alias)continue;
+    const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase();
+    const id=hash(code).slice(0,32),key=participantKey(id);
+    if(await db.get(key,{type:'json'})){existing++;continue}
+    const result=await db.setJSON(key,{candidateId,alias,codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});
+    if(result?.modified===false)existing++;else created++;
+   }
+   return json({created,existing});
+  }
   if(action==='prepare-invitation'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const candidateId=within(body.candidateId,160),alias=within(body.alias,70);
