@@ -55,6 +55,29 @@ export default async function handler(request){
    const people=await listParticipants(db);
    return json({participants:people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}))});
   }
+  if(action==='prepare-invitation'){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   const candidateId=within(body.candidateId,160),alias=within(body.alias,70);
+   if(!candidateId||!alias)return fail('Référence candidat et nom obligatoires');
+   const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase();
+   const id=hash(code).slice(0,32),key=participantKey(id);
+   const existing=await db.get(key,{type:'json'});
+   if(existing?.status==='revoked')return fail('Invitation révoquée',409);
+   if(!existing)await db.setJSON(key,{candidateId,alias,codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});
+   return json({id,code,alias:existing?.alias||alias,status:existing?.status||'invited'});
+  }
+  if(action==='scan-invitation'){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   const code=within(body.code,80).toUpperCase();
+   if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide');
+   const id=hash(code).slice(0,32),key=participantKey(id);
+   const rec=await db.get(key,{type:'json'});
+   if(!rec||!equal(rec.codeHash,hash(code))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
+   if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
+   rec.status='active';rec.checkedInAt=new Date().toISOString();
+   await db.setJSON(key,rec);
+   return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt});
+  }
   if(action==='checkin'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const alias=within(body.alias,70),team=within(body.team,50),teamSize=Number(body.teamSize||1);
