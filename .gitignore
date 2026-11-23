@@ -1,0 +1,15 @@
+node_modules/
+.netlify/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage/
+playwright-report/
+test-results/
+__snapshots__/
+*.zip
+*.xlsx
+*.csv
+!public/mission-control/data/*.csv
