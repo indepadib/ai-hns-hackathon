@@ -56,6 +56,16 @@ export default async function handler(request){
    const people=await listParticipants(db);
    return json({participants:people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}))});
   }
+  if(action==='invitation-details'){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   const candidateId=within(body.candidateId,160);
+   if(!candidateId)return fail('Référence candidat obligatoire');
+   const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase();
+   const id=hash(code).slice(0,32),rec=await db.get(participantKey(id),{type:'json'});
+   if(!rec||rec.status==='revoked')return fail('Invitation indisponible',404);
+   const qrCode=await QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320});
+   return json({id,alias:rec.alias,code,qrCode,status:rec.status,participantUrl:'https://ai.hns.ma/mission-control/'});
+  }
   if(action==='sync-recruitment'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const recruitmentKey=readEnv('HNS_RECRUITMENT_KEY');
