@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
@@ -64,7 +65,8 @@ export default async function handler(request){
    const existing=await db.get(key,{type:'json'});
    if(existing?.status==='revoked')return fail('Invitation révoquée',409);
    if(!existing)await db.setJSON(key,{candidateId,alias,codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});
-   return json({id,code,alias:existing?.alias||alias,status:existing?.status||'invited'});
+   const qrCode=await QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320});
+   return json({id,code,qrCode,alias:existing?.alias||alias,status:existing?.status||'invited'});
   }
   if(action==='scan-invitation'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);

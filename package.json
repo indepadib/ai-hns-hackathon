@@ -8,6 +8,11 @@
     "check": "node --check netlify/functions/mission.mjs && node --check public/mission-control/app.js",
     "verify": "npm run check && npm test"
   },
-  "dependencies": {"@netlify/blobs":"^9.1.0"},
-  "devDependencies": {"netlify-cli":"^23.0.0"}
+  "dependencies": {
+    "@netlify/blobs": "^9.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "netlify-cli": "^23.0.0"
+  }
 }
