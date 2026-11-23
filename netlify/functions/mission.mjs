@@ -11,14 +11,14 @@ const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return n
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{32}$/.test(id);
 const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
-const readEnv=name=>globalThis.Netlify?.env?.get(name)||process.env[name];
+const readEnv=name=>{const native=globalThis.Netlify?.env?.get(name);return (native||process.env[name]||'').trim()};
 const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
-export const config = { rateLimit: { windowLimit: 30, windowSize: 60, aggregateBy: ['ip'] } };
+export const config = { rateLimit: { action: 'rate_limit', windowLimit: 30, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request){
- if(request.method==='GET')return json({status:'ok',service:'hns-mission',version:'github-initial'});
+ if(request.method==='GET'){const ready=readEnv('HNS_SESSION_SECRET').length>=32&&Object.values(env).every(name=>readEnv(name).length>=8);console.info('HNS_RUNTIME_HEALTH',JSON.stringify(Object.fromEntries(['HNS_SESSION_SECRET',...Object.values(env)].map(name=>[name,!readEnv(name)?'missing':readEnv(name).length<(name==='HNS_SESSION_SECRET'?32:8)?'too_short':'ready']))));return json({status:ready?'ok':'configuration_required',service:'hns-mission',version:'runtime-health-v2'},ready?200:503)}
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
  if(Number(request.headers.get('content-length')||0)>250000)return fail('Requête trop volumineuse',413);
  const secret=readEnv('HNS_SESSION_SECRET');
