@@ -12,8 +12,8 @@ test('Police locale et CSP sans dépendance Google Fonts',()=>{
 });
 test('Secrets récupérés uniquement depuis les variables du serveur',()=>{
  for(const name of ['HNS_ADMIN_KEY','HNS_RH_KEY','HNS_JURY_KEY','HNS_SESSION_SECRET'])assert.ok(backend.includes(name),'Missing '+name);
- assert.ok(backend.includes('process.env.HNS_SESSION_SECRET'));
- assert.ok(backend.includes('process.env[env[role]]'));
+ assert.ok(backend.includes("readEnv('HNS_SESSION_SECRET')"));
+ assert.ok(backend.includes('readEnv(env[role])'));
 });
 test('Séparation des quatre parcours et contrôle d’accès côté serveur',()=>{
  for(const role of ['admin','rh','jury','participant'])assert.ok(ui.includes(role));
