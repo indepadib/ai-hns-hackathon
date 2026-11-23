@@ -16,6 +16,7 @@ const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
+export const config = { rateLimit: { windowLimit: 30, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request){
  if(request.method==='GET')return json({status:'ok',service:'hns-mission',version:'github-initial'});
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
@@ -29,7 +30,7 @@ export default async function handler(request){
  if(Object.hasOwn(loginRoles,action)){
   const role=loginRoles[action],key=readEnv(env[role]);
   if(!key||key.length<8){console.error('HNS_CONFIGURATION_INVALID '+env[role]);return fail('Accès '+role+' non configuré',503,'ROLE_NOT_CONFIGURED')}
-  if(typeof body.password!=='string'||!equal(body.password,key))return fail('Identifiants incorrects',401,'INVALID_CREDENTIALS');
+  if(typeof body.password!=='string'||body.password.length>256||!equal(hash(body.password),hash(key)))return fail('Identifiants incorrects',401,'INVALID_CREDENTIALS');
   return json({role,token:sign({role,exp:Date.now()+4*60*60*1000},secret)});
  }
  try{
