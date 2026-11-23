@@ -152,6 +152,25 @@ export default async function handler(request){
   if(auth.role!=='participant'||!validId(auth.id))return fail('Accès participant requis',403);
   const key=participantKey(auth.id),rec=await db.get(key,{type:'json'});
   if(!rec||rec.status!=='active')return fail('Accès désactivé',403);
+  if(action==='matching-list'){
+   const people=await listParticipants(db);
+   return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!p.team).map(p=>({id:p.id,alias:p.alias})),choice:rec.matchChoice||null,team:rec.team||null});
+  }
+  if(action==='matching-choice'){
+   if(rec.team||rec.submitted)return fail('Choix déjà verrouillé',409);
+   if(!rec.checkedInAt)return fail('Présence requise',403);
+   const target=body.target;
+   if(target!=='solo'&&(!validId(target)||target===auth.id))return fail('Choix invalide');
+   if(target!=='solo'){
+    const peer=await db.get(participantKey(target),{type:'json'});
+    if(!peer||peer.status!=='active'||!peer.checkedInAt||peer.team)return fail('Participant indisponible',409);
+   }
+   rec.matchChoice=target;
+   await db.setJSON(key,rec);
+   if(target==='solo')return json({choice:target,mutual:false});
+   const peer=await db.get(participantKey(target),{type:'json'});
+   return json({choice:target,mutual:peer?.matchChoice===auth.id});
+  }
   if(action==='load')return json({workspace:rec.workspace||{},version:rec.version||0,submitted:!!rec.submitted,submittedAt:rec.submittedAt||null});
   if(action==='save'){
    if(rec.submitted)return fail('Dossier déjà soumis',409);
