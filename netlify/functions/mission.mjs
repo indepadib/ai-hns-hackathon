@@ -266,7 +266,7 @@ export default async function handler(request){
    return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,teamId});
   }
   let dossierKey=key;
-  const matching=await db.get('matching-state-v2',{type:'json'});const matchedId=matching?.teams?.[auth.id];if(matchedId){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===matchedId);dossierKey='team-'+matchedId;await db.setJSON(dossierKey,{members,alias:'Binôme '+matchedId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});}
+  const matching=await db.get('matching-state-v2',{type:'json'});const matchedId=matching?.teams?.[auth.id];if(['save','submit'].includes(action)&&Object.hasOwn(body,'teamId')&&(body.teamId||null)!==(matchedId||null))return fail('Votre équipe a changé. Rechargez le dossier partagé avant de poursuivre.',409,'TEAM_CHANGED');if(matchedId){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===matchedId);dossierKey='team-'+matchedId;await db.setJSON(dossierKey,{members,alias:'Binôme '+matchedId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});}
   const metadata=await db.getWithMetadata(dossierKey,{type:'json'});
   if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
   const dossier=metadata.data;
