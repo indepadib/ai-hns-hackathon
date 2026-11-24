@@ -157,7 +157,7 @@ export default async function handler(request){
    if(!validId(body.id))return fail('Identifiant invalide');
    const team=await db.get('team-'+body.id,{type:'json'}),rec=team||await db.get(participantKey(body.id),{type:'json'});
    if(!rec||(!team&&rec.status!=='active'))return fail('Dossier indisponible',404);
-   return json({alias:rec.alias,workspace:rec.workspace||{},signals:teamSignals(rec.workspace),submitted:!!rec.submitted,score:rec.score||null});
+   const memberIds=team&&Array.isArray(team.members)?team.members:[body.id];const members=(await Promise.all(memberIds.filter(validId).map(async id=>({id,rec:await db.get(participantKey(id),{type:'json'})})))).filter(x=>x.rec?.status==='active'&&x.rec?.checkedInAt).map(x=>({id:x.id,alias:x.rec.alias}));return json({alias:rec.alias,members,workspace:rec.workspace||{},signals:teamSignals(rec.workspace),submitted:!!rec.submitted,score:rec.score||null});
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
