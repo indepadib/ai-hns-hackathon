@@ -39,6 +39,8 @@ jobs:
           assert set(files)==allowed
           for name,content in files.items():
               p=pathlib.Path(name);p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(content.encode('utf-8'))
+          homepage=unpack('rh-index.zlib.b64','7f164b5389fd55bb8c9fbcc24a1c78bfcd572c6f468a0ecdf33f7767de04c790')
+          pathlib.Path('public/index.html').write_bytes(homepage)
           manifest="""__forms.html df48dd242e0b99741af024517afb72959e6479f64c3f023bd2a7db421bf86c2b
           admin-recrutement.html bc2746e20961fc9a630db861a7f5dff3f9ec1fab56dd119eecd79bbb9b3a5c67
           admin.css b7b293d16ec49532162b9d6d98553a8913e5601f3bd742fd47fd8271d4477be8
