@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {marker as restoreMarker} from '../../lib/restore-confirmed.mjs';
 import {resetEligibility,resetRecord} from '../../lib/rh-preselection.mjs';
 import {invitationBlocker} from '../../lib/invitation-readiness.mjs';
 import {oauthConfig,beginOAuth,oauthAccess,oauthStatus,gmailSend,connectionKey,mailbox} from '../../lib/gmail-oauth.mjs';
@@ -93,6 +94,10 @@ export default async function handler(request,context){
     if(write?.modified)return json({rsvp:next.rsvp,respondedAt:next.respondedAt});
    }
    return fail('Réponse concurrente, réessayez',409);
+  }
+  if(action==='rh-restore-status'){
+   if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
+   return json({report:await db.get(restoreMarker,{type:'json'})||{state:'not_started'}});
   }
   if(action==='rh-reset-preview'||action==='rh-reset-apply'){
    if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
