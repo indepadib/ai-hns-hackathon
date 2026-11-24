@@ -1,0 +1,51 @@
+name: Import verified RH recovery package
+on:
+  push:
+    branches: [integration/unified-platform]
+    paths: [hns-rh-overlay.zip]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: unified-rh-import
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.ref == 'refs/heads/integration/unified-platform'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/unified-platform
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and extract only the approved archive
+        run: |
+          python3 - <<'PY'
+          import hashlib, zipfile, pathlib
+          p=pathlib.Path('hns-rh-overlay.zip')
+          assert hashlib.sha256(p.read_bytes()).hexdigest() == 'c3cd68742acddcc15b049e8e9cff3b73124664210d2402e350f0d474af5f04f1', 'Wrong archive'
+          allowed={'netlify/functions/_cv.mjs','netlify/functions/_utils.mjs','netlify/functions/candidate-cv.mjs','netlify/functions/candidates-admin.mjs','netlify/functions/on-candidate.mjs','netlify/functions/triage.mjs','public/__forms.html','public/admin-recrutement.html','public/admin.css','public/admin.js','public/app.js','public/assets/favicon.svg','public/assets/hero-sculpture-blue.webp','public/assets/hero-sculpture.webp','public/assets/hns-group-favicon.png','public/assets/hns-group-logo.png','public/assets/hns-group-original.jpeg','public/assets/ismael.webp','public/confidentialite.html','public/config.js','public/index.html','public/merci.html','public/styles.css','tests/recruitment-admin-api.test.mjs','tests/recruitment-cv.test.mjs','tests/recruitment-triage.test.mjs','tests/recruitment-unified-contract.test.mjs','tests/recruitment-utils.test.mjs'}
+          with zipfile.ZipFile(p) as z:
+              assert len(z.namelist())==28 and set(z.namelist())==allowed, 'Unexpected files'
+              for name in sorted(allowed):
+                  target=pathlib.Path(name)
+                  target.parent.mkdir(parents=True,exist_ok=True)
+                  target.write_bytes(z.read(name))
+          PY
+      - name: Install and validate
+        run: |
+          npm install --no-audit --no-fund
+          npm run verify
+          node --check public/admin.js
+          node --check public/app.js
+          for f in netlify/functions/*.mjs; do node --check "$f"; done
+      - name: Commit verified recovery to integration branch only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public netlify/functions tests
+          git rm hns-rh-overlay.zip
+          git commit -m "Restore verified recruitment sources and integrate candidate pass"
+          git push origin HEAD:integration/unified-platform
