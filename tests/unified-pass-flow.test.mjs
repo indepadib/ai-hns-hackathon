@@ -62,7 +62,19 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   assert.equal((await call({action:'invitation-rsvp',code,response:'confirmed'})).status,200);
   const scan=await call({action:'scan-invitation',code},token);assert.equal(scan.status,200,JSON.stringify(scan.data));
   assert.equal((await call({action:'scan-invitation',code:qr},token)).data.alreadyPresent,true);
-  assert.equal((await call({action:'participant-login',code})).status,200);
+  const participant=await call({action:'participant-login',code});assert.equal(participant.status,200);
+  const pt=participant.data.token;
+  const org=await call({action:'admin-login',password:env.HNS_ADMIN_KEY});assert.equal(org.status,200);
+  for(const stage of ['challenge','problem','solution','pitch','submission'])assert.equal((await call({action:'schedule-update',stage,opensAt:0},org.data.token)).status,200);
+  const workspace={problem:{summary:'Test problem'},solution:{summary:'Test solution'},submission:{result:'Working prototype'}};
+  const saveRequest={action:'save',workspace,version:0,teamId:null,requestId:randomUUID()};
+  const saved=await call(saveRequest,pt);assert.equal(saved.status,200,JSON.stringify(saved.data));assert.equal(saved.data.version,1);
+  const replay=await call(saveRequest,pt);assert.equal(replay.status,200);assert.equal(replay.data.version,1);assert.equal(replay.data.replayed,true);
+  assert.equal((await call({...saveRequest,workspace:{problem:{summary:'different'}}},pt)).status,409);
+  assert.equal((await call({...saveRequest,requestId:randomUUID()},pt)).status,409);
+  const submitted=await call({action:'submit',version:1,teamId:null},pt);assert.equal(submitted.status,200,JSON.stringify(submitted.data));
+  const again=await call({action:'submit',version:1,teamId:null},pt);assert.equal(again.status,200);assert.equal(again.data.receipt,submitted.data.receipt);
+  const loaded=await call({action:'load'},pt);assert.equal(loaded.data.receipt,submitted.data.receipt);assert.deepEqual(loaded.data.workspace,workspace);
   const after=await call({action:'recruitment-status',candidateIds:[candidateId]},admin);assert.ok(after.data.entries[0].checkedInAt);
   assert.equal((await call({action:'revoke',id},token)).status,200);assert.equal((await call({action:'participant-login',code})).status,401);
  }finally{globalThis.fetch=oldFetch;for(const [k,v] of Object.entries(oldEnv)){if(v===undefined)delete process.env[k];else process.env[k]=v}await Promise.all([unlink(mock).catch(()=>{}),unlink(entry).catch(()=>{})]);}
