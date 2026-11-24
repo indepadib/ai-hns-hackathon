@@ -82,6 +82,11 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   const stale=await call({action:'jury-score',id,scores:{...scores,problem:0},expectedScoredAt:null},jt);assert.equal(stale.status,409);assert.equal(stale.data.code,'JURY_CONFLICT');
   const dossier=await call({action:'jury-dossier',id},jt);assert.equal(dossier.data.score.total,79.5);
   const updatedScore=await call({action:'jury-score',id,scores:{...scores,problem:90},expectedScoredAt:firstScore.data.score.scoredAt},jt);assert.equal(updatedScore.status,200);assert.equal(updatedScore.data.score.total,81.5);
+  assert.equal((await call({action:'final-results'},jt)).status,403);
+  assert.equal((await call({action:'final-results'},token)).status,403);
+  assert.equal((await call({action:'final-results'},pt)).status,403);
+  const obs=await call({action:'talent-observe',id,version:0,observation:{dimension:'data',phase:'build',observer:'Test observer',fact:'Checked synthetic dataset for missing values.'}},org.data.token);assert.equal(obs.status,200);
+  const final=await call({action:'final-results'},org.data.token);assert.equal(final.status,200,JSON.stringify(final.data));assert.equal(final.data.projects.length,1);assert.equal(final.data.projects[0].rank,1);assert.equal(final.data.projects[0].score.total,81.5);assert.equal(final.data.people[0].count,1);assert.equal(final.data.metrics.observed,1);assert.equal(Object.hasOwn(final.data.people[0],'rank'),false);
   const after=await call({action:'recruitment-status',candidateIds:[candidateId]},admin);assert.ok(after.data.entries[0].checkedInAt);
   assert.equal((await call({action:'revoke',id},token)).status,200);assert.equal((await call({action:'participant-login',code})).status,401);
  }finally{globalThis.fetch=oldFetch;for(const [k,v] of Object.entries(oldEnv)){if(v===undefined)delete process.env[k];else process.env[k]=v}await Promise.all([unlink(mock).catch(()=>{}),unlink(entry).catch(()=>{})]);}

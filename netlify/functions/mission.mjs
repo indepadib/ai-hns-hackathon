@@ -1,3 +1,4 @@
+import {finalResults} from '../../lib/final-results.mjs';
 import QRCode from 'qrcode';
 import {marker as restoreMarker} from '../../lib/restore-confirmed.mjs';
 import {resetEligibility,resetRecord} from '../../lib/rh-preselection.mjs';
@@ -215,6 +216,20 @@ export default async function handler(request,context){
    }
    const now=Date.now();
    return json({now,stages:stages.map(x=>({...x,unlocked:now>=x.opensAt}))});
+  }
+  if(action==='final-results'){
+   if(auth.role!=='admin')return fail('Accès administrateur requis',403);
+   const present=(await listParticipants(db)).filter(p=>p.status==='active'&&p.checkedInAt);
+   const byId=new Map(present.map(p=>[p.id,p])),assigned=new Set(),projects=[];let cursor;
+   async function add(id,rec,memberIds,kind){
+    const holdout=rec.submitted?await db.get('jury-holdout-v1-'+kind+'-'+id,{type:'json'}):null;
+    projects.push({id,alias:rec.alias,members:memberIds.map(mid=>({id:mid,alias:byId.get(mid)?.alias||'Participant non présent'})),challenge:rec.workspace?.challenge?.id||null,submitted:!!rec.submitted,submittedAt:rec.submittedAt||null,score:rec.score||null,documented:teamSignals(rec.workspace).documented,holdout:holdout?.report?{macroF1:holdout.report.metrics?.macroF1??null,baselineF1:holdout.report.baseline?.macroF1??null}:null});
+   }
+   do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(let i=0;i<page.blobs.length;i+=12){await Promise.all(page.blobs.slice(i,i+12).map(async entry=>{const rec=await db.get(entry.key,{type:'json'});if(!rec||!Array.isArray(rec.members))return;rec.members.forEach(id=>assigned.add(id));if(rec.members.some(id=>byId.has(id)))await add(entry.key.slice(5),rec,rec.members,'team')}))}cursor=page.cursor}while(cursor);
+   const solos=present.filter(p=>!assigned.has(p.id));
+   for(let i=0;i<solos.length;i+=12)await Promise.all(solos.slice(i,i+12).map(async p=>{const rec=await db.get(participantKey(p.id),{type:'json'});if(rec)await add(p.id,rec,[p.id],'solo')}));
+   const people=[];for(let i=0;i<present.length;i+=12)await Promise.all(present.slice(i,i+12).map(async p=>{const profile=await db.get('talent-observation-v1-'+p.id,{type:'json'});people.push({id:p.id,alias:p.alias,...summarizeTalent(profile)})}));
+   return json({generatedAt:new Date().toISOString(),...finalResults(projects,people)});
   }
   if(action==='team-dashboard'){
    if(!['admin','jury'].includes(auth.role))return fail('Accès interdit',403);
