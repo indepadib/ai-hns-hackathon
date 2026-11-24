@@ -9,13 +9,32 @@ let gmailReady=false,campaignRunning=false,campaignStop=false,campaignChosen=new
 const txt=(s)=>document.createTextNode(String(s??''));
 function el(tag,className='',value){const x=document.createElement(tag);if(className)x.className=className;if(value!==undefined)x.textContent=String(value);return x;}
 function notify(message,error=false){const e=$('toast');e.textContent=message;e.hidden=false;e.style.background=error?'#803f37':'#193d30';clearTimeout(notify.timeout);notify.timeout=setTimeout(()=>e.hidden=true,5200);}
-async function api(method='GET',body){
- const res=await fetch('/.netlify/functions/candidates-admin',{method,headers:{'Authorization':'Bearer '+secret,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store',credentials:'same-origin'});
- let data;try{data=await res.json()}catch{throw Error('Réponse serveur non valide')}
- if(!res.ok)throw Error(data.error||`Erreur ${res.status}`);return data;
+async function jsonRequest(path,method,body,credential=secret){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+ try{
+  const res=await fetch(path,{method,headers:{Authorization:'Bearer '+credential,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store',credentials:'same-origin',signal:controller.signal});
+  let data;try{data=await res.json()}catch{throw Object.assign(Error('Réponse serveur incomplète (HTTP '+res.status+').'),{status:res.status,retryable:res.status===200||res.status>=500})}
+  if(!res.ok)throw Object.assign(Error(data.error||'Erreur '+res.status),{status:res.status,retryable:res.status>=500||res.status===429});return data;
+ }catch(e){if(e.name==='AbortError'||e instanceof TypeError)throw Object.assign(Error('Connexion interrompue ou serveur trop lent.'),{retryable:true});throw e}finally{clearTimeout(timer)}
 }
-async function missionApi(body){const res=await fetch('/api/mission',{method:'POST',headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store',credentials:'same-origin'});const data=await res.json();if(!res.ok)throw Error(data.error||'Mission Control indisponible');return data;}
-async function loadMissionStatus(){missionStatus=new Map();missionUnavailable=false;try{const ids=records.filter(r=>['selected','invited','confirmed'].includes(r.status)).map(r=>r.id);for(let i=0;i<ids.length;i+=100){const r=await missionApi({action:'recruitment-status',candidateIds:ids.slice(i,i+100)});for(const entry of r.entries||[])missionStatus.set(entry.candidateId,entry);}}catch{missionUnavailable=true;}}
+async function api(method='GET',body,query=''){return jsonRequest('/.netlify/functions/candidates-admin'+query,method,body)}
+async function missionApi(body){return jsonRequest('/api/mission','POST',body)}
+async function retryRead(fn){for(let attempt=0;;attempt++){try{return await fn()}catch(e){if(!e.retryable||attempt>=2)throw e;await new Promise(r=>setTimeout(r,500*(attempt+1)))}}}
+let loadEpoch=0;
+async function loadMissionStatus(epoch=loadEpoch){
+ const statusMap=new Map();missionUnavailable=true;
+ try{
+  const ids=records.filter(r=>['selected','invited','confirmed'].includes(r.status)).map(r=>r.id);
+  for(let i=0;i<ids.length;i+=20){
+   const r=await retryRead(()=>missionApi({action:'recruitment-status',candidateIds:ids.slice(i,i+20)}));
+   if(epoch!==loadEpoch||!secret)return;
+   for(const entry of r.entries||[])statusMap.set(entry.candidateId,entry);
+  }
+  if(epoch!==loadEpoch||!secret)return;
+  missionStatus=statusMap;missionUnavailable=false;
+ }catch{if(epoch===loadEpoch)missionUnavailable=true}
+ if(epoch===loadEpoch&&secret){render();if(selected){selected=records.find(r=>r.id===selected.id)||null;if(selected){const send=$('sendInvite');send.disabled=!['selected','invited','confirmed'].includes(selected.status)||missionUnavailable;}}}
+}
 const passLabels={not_prepared:'Non préparé',invited:'Prêt pour accueil',active:'Présent / actif',revoked:'Révoqué',not_sent:'Non envoyé',sending:'En cours',accepted:'Accepté par le fournisseur',review_required:'À contrôler',pending:'En attente',confirmed:'Confirmée',declined:'Déclinée'};
 function passLabel(v){return passLabels[v]||'Non disponible';}
 function sanitizeCell(s){return String(s??'').replaceAll('"','""')}
@@ -47,7 +66,17 @@ function render(){updateMetrics();renderCampaignMetrics();const list=matchingRec
  }
 }
 async function load(){
- const data=await api();records=data.records||[];await loadMissionStatus();render();if(selected){selected=records.find(r=>r.id===selected.id)||null;if(selected)drawDetail();else closeDrawer()}notify(`${records.length} candidature(s) chargée(s)`);
+ const epoch=++loadEpoch,credential=secret;missionUnavailable=true;renderCampaignMetrics();
+ const index=await retryRead(()=>jsonRequest('/.netlify/functions/candidates-admin?index=1','GET',undefined,credential));
+ if(!Array.isArray(index.ids)||index.ids.length!==index.count)throw Error('Liste des dossiers incomplète. Réessayez.');
+ const chunks=[];for(let i=0;i<index.ids.length;i+=20)chunks.push(index.ids.slice(i,i+20));
+ const fetched=[];let next=0,done=0;
+ const worker=async()=>{while(next<chunks.length){if(epoch!==loadEpoch||secret!==credential)return;const ids=chunks[next++];const data=await retryRead(async()=>{const result=await jsonRequest('/.netlify/functions/candidates-admin','POST',{action:'read-batch',ids},credential);if(!Array.isArray(result.records)||result.records.length!==ids.length||result.missing?.length||new Set(result.records.map(r=>r.id)).size!==ids.length||result.records.some(r=>!ids.includes(r.id)))throw Object.assign(Error('Lot de dossiers incomplet.'),{retryable:true});return result});if(epoch!==loadEpoch||secret!==credential)return;fetched.push(...data.records);done+=data.records.length;$('loginProgress').textContent='Chargement sécurisé : '+done+'/'+index.count+' dossiers';$('countLabel').textContent='Chargement : '+done+'/'+index.count;}};
+ await Promise.all(Array.from({length:Math.min(3,chunks.length)},worker));
+ if(epoch!==loadEpoch||secret!==credential)return;
+ records=fetched.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+ missionStatus=new Map();render();if(selected){selected=records.find(r=>r.id===selected.id)||null;if(selected)drawDetail();else closeDrawer()}
+ notify(records.length+' candidature(s) chargée(s)');void loadMissionStatus(epoch);
 }
 function clearCVPreview(){
  cvRequestNumber++;
@@ -110,8 +139,8 @@ async function invite(){if(!selected||!['selected','invited','confirmed'].includ
 function exportCSV(){const cols=['Date','Nom','Email','Verticale','Parcours','Statut RH','Documentation /100','CV déclaré'];const list=[cols,...matchingRecords().map(r=>[r.createdAt,r.name,r.email,r.track,r.school,labelStatus[r.status]||r.status,r.triage?.score||0,r.hasCV?'Oui':'Non'])];const csv='\ufeff'+list.map(row=>row.map(v=>'"'+sanitizeCell(v)+'"').join(';')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='hns-ai-talent-candidatures-2026.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),500)}
 function csvParse(raw){const rows=[];let row=[],v='',q=false;for(let i=0;i<raw.length;i++){const ch=raw[i];if(ch==='"'){if(q&&raw[i+1]==='"'){v+='"';i++}else q=!q}else if(ch===','&&!q){row.push(v);v=''}else if((ch==='\n'||ch==='\r')&&!q){if(ch==='\r'&&raw[i+1]==='\n')i++;row.push(v);rows.push(row);row=[];v=''}else v+=ch}if(v||row.length){row.push(v);rows.push(row)}if(rows.length<2)return [];const headings=rows.shift().map(h=>h.replace(/^\ufeff/,'').trim().toLowerCase().replace(/[^a-z0-9_]/g,''));return rows.map(row=>Object.fromEntries(headings.map((h,i)=>[h,row[i]||'']))).filter(x=>Object.values(x).some(Boolean))}
 function normalizeImport(row){const aliases={name:['name','nom','fullname','nomcomplet'],email:['email','emailaddress','courriel'],school:['school','ecole','parcours'],status:['status','statut'],created_at:['created_at','createdat','date','submittedat'],project:['project','projet'],obstacle:['obstacle'],portfolio:['portfolio','lien'],ai_tools:['ai_tools','aitools'],ai_usage:['ai_usage','aiusage'],ai_agents:['ai_agents','aiagents'],ai_agent_idea:['ai_agent_idea','aiagentidea'],track:['track','verticale'],format:['format'],opportunity:['opportunity'],city:['city','ville'],availability:['availability'],source:['source'],consent:['consent'],cv:['cv']};const out={};for(const [field,names] of Object.entries(aliases)){const key=names.find(k=>row[k]!==undefined);out[field]=key?row[key]:''}return out}
-$('loginForm').addEventListener('submit',async e=>{e.preventDefault();secret=$('adminKey').value.trim();$('adminKey').value='';try{await load();$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;void gmailStatus()}catch(err){secret='';notify(err.message,true)}});
-$('logout').onclick=()=>{campaignStop=true;gmailReady=false;campaignChosen.clear();sessionStorage.removeItem('hns_mission_token');sessionStorage.removeItem('hns_mission_role');clearCVPreview();secret='';records=[];selected=null;closeDrawer();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;notify('Session fermée')};
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();const button=e.currentTarget.querySelector('button[type=submit]');if(button.disabled)return;button.disabled=true;button.textContent='Connexion…';$('loginProgress').textContent='Vérification de l’accès RH…';secret=$('adminKey').value.trim();try{await load();$('adminKey').value='';$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;void gmailStatus()}catch(err){loadEpoch++;secret='';records=[];$('loginProgress').textContent=err.status===401?'Jeton RH incorrect.':err.message+' Réessayez sans ressaisir le jeton.';notify($('loginProgress').textContent,true)}finally{button.disabled=false;button.textContent='Accéder au cockpit'}});
+$('logout').onclick=()=>{loadEpoch++;campaignStop=true;gmailReady=false;campaignChosen.clear();sessionStorage.removeItem('hns_mission_token');sessionStorage.removeItem('hns_mission_role');clearCVPreview();secret='';records=[];selected=null;closeDrawer();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;notify('Session fermée')};
 $('refresh').onclick=()=>load().catch(e=>notify(e.message,true));$('exportCsv').onclick=exportCSV;
 for(const id of ['search','filterStatus','filterTrack','sortBy'])$(id).addEventListener(id==='search'?'input':'change',render);
 $('closeDrawer').onclick=closeDrawer;$('shade').onclick=closeDrawer;document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeDrawer()});$('saveNote').onclick=addNote;$('sendInvite').onclick=invite;
@@ -176,8 +205,9 @@ async function analyzeReset(){
  resetSnapshot=null;setResetBusy(true);$('resetSummary').textContent='Analyse sécurisée de l’historique, des emails et des réponses…';$('resetRows').replaceChildren();
  try{
   const includeSelected=$('resetIncludeSelected').checked;
-  const data=await missionApi({action:'rh-reset-preview',includeSelected});
-  resetSnapshot={eligible:data.eligible||[],protected:data.protected||[],includeSelected};
+  const candidates=records.filter(r=>r.status==='confirmed'||includeSelected&&r.status==='selected').map(r=>r.id);
+  const data={eligible:[],protected:[]};for(let i=0;i<candidates.length;i+=20){const result=await retryRead(()=>missionApi({action:'rh-reset-preview',includeSelected,ids:candidates.slice(i,i+20)}));data.eligible.push(...result.eligible);data.protected.push(...result.protected);$('resetSummary').textContent='Analyse : '+Math.min(i+20,candidates.length)+'/'+candidates.length+' dossiers';}
+  resetSnapshot={eligible:data.eligible,protected:data.protected,includeSelected};
   $('resetSummary').textContent=resetSnapshot.eligible.length+' dossier(s) à reclasser · '+resetSnapshot.protected.length+' protégé(s). Aucun email ne sera envoyé.';
   for(const [list,label] of [[resetSnapshot.eligible,'À reclasser'],[resetSnapshot.protected,'Protégé — inchangé']]){
    for(const r of list){const item=el('div','campaign-row');const info=el('div');info.append(el('strong','',r.name||'Sans nom'),el('small','',label+' · '+(labelStatus[r.status]||r.status)));item.append(info);$('resetRows').append(item);}
