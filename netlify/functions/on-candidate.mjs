@@ -5,7 +5,7 @@ import {normalizeCV,candidateHasCV} from './_cv.mjs';
 // Verified platform event; the website's public form cannot write directly to the private RH store.
 export default {
  async formSubmitted(event){
-  if(process.env.CONTEXT&&process.env.CONTEXT!=='production')return;
+  if(process.env.HNS_UNIFIED_PRODUCTION!=='true'||(process.env.CONTEXT&&process.env.CONTEXT!=='production'))return;
   const raw=event?.data||{};const data=dataFromSubmission(raw);
   const cvFile=normalizeCV(raw.cv);const hasCV=candidateHasCV(raw.cv);
   const email=clean(data.email,254).toLowerCase();
@@ -13,7 +13,7 @@ export default {
   const store=getStore(openStoreOptions());const id=candidateId(email);
   const existing=await store.get(id,{type:'json'});
   if(existing){ // Same email: do not overwrite RH decisions, notes or invitation state.
-    if(cvFile && !existing.cvFile){const meta=await store.getMetadata(id);if(meta?.etag)await store.setJSON(id,{...existing,cvFile,hasCV:true},{onlyIfMatch:meta.etag});}
+    if(cvFile && !existing.cvFile){const current=await store.getWithMetadata(id,{type:'json'});if(current?.etag&&current.data&&!current.data.cvFile)await store.setJSON(id,{...current.data,cvFile,hasCV:true},{onlyIfMatch:current.etag});}
     if(!existing.ackSentAt&&ready()){
       await sendMail(email,receiptTemplate(existing.name),`hns-received-${id}`);
       const current=await store.getWithMetadata(id,{type:'json'});if(current?.data&&!current.data.ackSentAt)await store.setJSON(id,{...current.data,ackSentAt:new Date().toISOString()},{onlyIfMatch:current.etag});
