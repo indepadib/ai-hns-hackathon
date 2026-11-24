@@ -17,6 +17,7 @@ const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
+const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
 export const config = { rateLimit: { action: 'rate_limit', windowLimit: 30, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request){
  if(request.method==='GET'){const ready=readEnv('HNS_SESSION_SECRET').length>=32&&Object.values(env).every(name=>readEnv(name).length>=8);console.info('HNS_RUNTIME_HEALTH',JSON.stringify(Object.fromEntries(['HNS_SESSION_SECRET',...Object.values(env)].map(name=>[name,!readEnv(name)?'missing':readEnv(name).length<(name==='HNS_SESSION_SECRET'?32:8)?'too_short':'ready']))));return json({status:ready?'ok':'configuration_required',service:'hns-mission',version:'runtime-health-v2'},ready?200:503)}
@@ -48,7 +49,7 @@ export default async function handler(request){
   if(!auth)return fail('Session absente ou expirée',401,'NOT_AUTHENTICATED');
   if(action==='me')return json({role:auth.role,id:auth.id||null});
   if(action==='schedule'||action==='schedule-update'){
-   const defaults=[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
+   const defaults=defaultSchedule();
    let stages=await db.get('event-schedule',{type:'json'})||defaults;
    if(action==='schedule-update'){
     if(auth.role!=='admin')return fail('Accès administrateur requis',403);
@@ -165,6 +166,10 @@ export default async function handler(request){
   if(auth.role!=='participant'||!validId(auth.id))return fail('Accès participant requis',403);
   const key=participantKey(auth.id),rec=await db.get(key,{type:'json'});
   if(!rec||rec.status!=='active')return fail('Accès désactivé',403);
+  const schedule=await db.get('event-schedule',{type:'json'})||defaultSchedule();
+  const isOpen=id=>schedule.some(stage=>stage.id===id&&Date.now()>=stage.opensAt);
+  if(['matching-list','matching-choice'].includes(action)&&!isOpen('matching'))return fail('Matching pas encore ouvert',403,'STAGE_LOCKED');
+  if(action==='submit'&&!isOpen('submission'))return fail('Soumission pas encore ouverte',403,'STAGE_LOCKED');
   if(action==='matching-list'){
    const people=await listParticipants(db);
    return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!p.team).map(p=>({id:p.id,alias:p.alias})),choice:rec.matchChoice||null,team:rec.team||null});
@@ -207,11 +212,12 @@ export default async function handler(request){
   if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
   const dossier=metadata.data;
   if(action==='save'){
+   if(!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
    if(dossier.submitted)return fail('Dossier déjà soumis',409);
    if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const w=body.workspace;if(!w||typeof w!=='object'||Array.isArray(w))return fail('Dossier invalide');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
-   const clean={};for(const k of allowed)if(w[k]!==undefined)clean[k]=w[k];
+   const stageFor={problem:'problem',solution:'solution',tasks:'build',tests:'build',decisions:'build',redteam:'redteam',audit:'redteam',submission:'pitch',challenge:'challenge'};const clean={...dossier.workspace};for(const k of allowed)if(w[k]!==undefined&&isOpen(stageFor[k]))clean[k]=w[k];
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
    dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();
    const write=await db.setJSON(dossierKey,dossier,{onlyIfMatch:metadata.etag});if(!write?.modified)return fail('Modification concurrente : rechargez le dossier',409,'VERSION_CONFLICT');
