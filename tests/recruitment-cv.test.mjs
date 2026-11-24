@@ -27,7 +27,9 @@ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hns-cv-test-'));
 for(const name of ['_utils.mjs','_cv.mjs'])fs.copyFileSync(path.resolve('netlify/functions',name),path.join(dir,name));
 fs.writeFileSync(path.join(dir,'fakeblobs.mjs'),`export const data=new Map();export function getStore(){return {get:async id=>data.get(id)||null,getMetadata:async()=>({etag:'version-1'}),setJSON:async()=>({modified:true})}}`);
 fs.writeFileSync(path.join(dir,'candidate-cv.mjs'),fs.readFileSync(path.resolve('netlify/functions/candidate-cv.mjs'),'utf8').replace("from '@netlify/blobs'","from './fakeblobs.mjs'"));
-const {default:cvHandler,findCVForEmail}=await import(pathToFileURL(path.join(dir,'candidate-cv.mjs')));
+const {default:rawCVHandler,findCVForEmail}=await import(pathToFileURL(path.join(dir,'candidate-cv.mjs')));
+const liveContext={site:{id:'33dae2ce-086d-4470-b6fe-248f3ca49b70'},deploy:{context:'production'}};
+const cvHandler=(req,context=liveContext)=>rawCVHandler(req,context);
 const {data:store}=await import(pathToFileURL(path.join(dir,'fakeblobs.mjs')));
 const id='a'.repeat(64);const token='z'.repeat(48);process.env.CONTEXT='production';process.env.HNS_ADMIN_TOKEN=token;
 function req(auth=true){return new Request(`https://ai.hns.ma/.netlify/functions/candidate-cv?id=${id}`,{headers:auth?{Authorization:'Bearer '+token,Origin:'https://ai.hns.ma'}:{Origin:'https://ai.hns.ma'}})}
@@ -50,3 +52,5 @@ test('Authenticated backend proxies PDF bytes only',async()=>{
  globalThis.fetch=async()=>new Response(new TextEncoder().encode('%PDF-1.7\nexample-data'),{status:200,headers:{'Content-Type':'application/pdf'}});
  try{const res=await cvHandler(req(true));assert.equal(res.status,200);assert.equal(res.headers.get('content-type'),'application/pdf');assert.equal(res.headers.get('cache-control'),'private, no-store, max-age=0');assert.ok((await res.arrayBuffer()).byteLength>5);}finally{globalThis.fetch=savedFetch;}
 });
+
+test('CV endpoint is blocked on preview and alternate sites',async()=>{assert.equal((await cvHandler(req(true),{site:{id:'staging'},deploy:{context:'production'}})).status,403);assert.equal((await cvHandler(req(true),{...liveContext,deploy:{context:'deploy-preview'}})).status,403)});
