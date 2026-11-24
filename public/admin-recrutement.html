@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer"><title>H&S Talent Manager · Administration RH</title><link rel="icon" href="/assets/hns-group-favicon.png"><link rel="stylesheet" href="/admin.css"></head>
+<body>
+<div class="app-shell">
+ <aside class="sidebar">
+  <div class="brand"><img src="/assets/hns-group-logo.png" alt="H&S Group" width="108"><span>Talent Manager</span></div>
+  <div class="sidebar-label">RECRUTEMENT · 2026</div>
+  <div class="nav-item current">▦ <span>Vue d'ensemble</span></div>
+  <div class="nav-item">◎ <span>H&S AI Talent Challenge</span></div>
+  <div class="sidebar-foot"><span class="live-dot"></span> Hébergé sur Netlify <small>Accès RH privé • édition 2026</small></div>
+ </aside>
+ <main class="main">
+  <header class="topbar"><div><div class="eyebrow">H&S GROUP / TALENT INTELLIGENCE</div><h1>Gestion des candidatures</h1><p>Une sélection structurée, un parcours fluide, et aucune décision RH automatisée.</p></div><div class="top-actions"><a href="/" target="_blank" rel="noopener">Voir le site ↗</a><button id="logout" class="iconbtn" hidden>Déconnexion</button></div></header>
+  <section id="login" class="login-panel"><div class="login-mark">H&S <span>AI</span></div><h2>Accès recruteur</h2><p>Connecte-toi à l'aide du jeton RH configuré dans Netlify. Il n'est jamais sauvegardé dans le navigateur.</p><form id="loginForm"><label for="adminKey">Jeton RH privé</label><div class="login-row"><input id="adminKey" type="password" autocomplete="off" minlength="32" required placeholder="Clé d'accès privée"><button type="submit" class="primary">Accéder au cockpit ↗</button></div></form><p class="subtle">L’aperçu des CV est réservé à cette session RH et ne conserve aucun fichier dans le navigateur.</p></section>
+  <section id="workspace" hidden>
+    <div class="metrics">
+      <article class="metric"><span>CANDIDATURES</span><strong id="nTotal">0</strong><small>Enregistrées dans le cockpit</small></article>
+      <article class="metric"><span>DOSSIERS DOCUMENTÉS</span><strong id="nDocumented">0</strong><small>À examiner en priorité</small></article>
+      <article class="metric"><span>À ÉTUDIER</span><strong id="nReview">0</strong><small>Non encore sélectionnés</small></article>
+      <article class="metric"><span>INVITATIONS ENVOYÉES</span><strong id="nInvited">0</strong><small>Confirmations à suivre</small></article>
+    </div>
+    <section class="notice"><div class="notice-icon">✦</div><p><strong>Présélection gratuite et explicable.</strong> La jauge évalue la <b>documentation du dossier</b>, pas la valeur du candidat. Elle n'utilise ni l'école, ni la ville, ni les informations démographiques. Aucune candidature n'est refusée automatiquement.</p></section>
+    <section class="list-panel">
+      <div class="list-head"><div><h2>Pipeline des talents</h2><p id="countLabel">Chargement des dossiers…</p></div><div class="list-actions"><button id="refresh">↻ Actualiser</button><button id="exportCsv">↓ Export CSV</button></div></div>
+      <div class="filters"><label><span>Rechercher</span><input id="search" type="search" placeholder="Nom, email, projet, outil IA…"></label><label><span>Statut RH</span><select id="filterStatus"><option value="">Tous les statuts</option><option value="received">Reçu</option><option value="review">À étudier</option><option value="interview">Entretien</option><option value="selected">Sélectionné</option><option value="invited">Invité</option><option value="confirmed">Confirmé</option><option value="rejected">Non retenu</option></select></label><label><span>Verticale</span><select id="filterTrack"><option value="">Toutes les verticales</option></select></label><label><span>Ordre</span><select id="sortBy"><option value="recent">Plus récents</option><option value="documented">Dossiers les mieux documentés</option><option value="oldest">Plus anciens</option></select></label></div>
+      <div class="table-wrap"><table><thead><tr><th>CANDIDAT</th><th>VERTICALE</th><th>DOCUMENTATION</th><th>STATUT RH</th><th>CANDIDATURE</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="6" class="empty">Connecte-toi pour voir les candidatures.</td></tr></tbody></table></div>
+      <div class="list-bottom"><p>Ouvre une fiche candidat pour consulter son CV directement. Les anciens fichiers peuvent nécessiter une synchronisation via Netlify Forms.</p><button id="openImport">Importer anciennes candidatures CSV</button></div>
+    </section>
+    <p class="disclaimer">Les critères automatiques ne sont pas une évaluation du mérite. Vérifiez les réponses et les réalisations en entretien avant de prendre une décision.</p>
+  </section>
+ </main>
+</div>
+<div id="shade" class="shade" hidden></div>
+<aside id="drawer" class="drawer" aria-labelledby="drawerTitle" role="dialog" aria-modal="true" hidden><header class="drawer-head"><div><span class="eyebrow">FICHE CANDIDAT</span><h2 id="drawerTitle">Profil</h2><p id="drawerEmail"></p></div><button id="closeDrawer" class="close" aria-label="Fermer">✕</button></header><div id="drawerBody" class="drawer-body"></div><footer class="drawer-foot"><button id="saveNote" class="light">Ajouter une note</button><button id="sendInvite" class="primary">Envoyer l'invitation ↗</button></footer></aside>
+<dialog id="importDialog"><form method="dialog" class="import-head"><h2>Reprendre les candidatures historiques</h2><button value="cancel" aria-label="Fermer">✕</button></form><p>Si des dossiers ont été reçus <strong>avant</strong> l'installation du cockpit, exporte le CSV de Netlify Forms puis importe-le ici. Les emails déjà présents ne seront pas écrasés.</p><label class="upload">Choisir un export CSV Netlify Forms<input id="importCsv" type="file" accept=".csv,text/csv"></label><p id="importPreview"></p><button id="doImport" class="primary" disabled>Importer les dossiers</button></dialog>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+<script type="module" src="/admin.js"></script>
+</body></html>

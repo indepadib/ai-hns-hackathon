@@ -1,0 +1,61 @@
+import {getStore} from '@netlify/blobs';
+import {secureTokenEqual,env,openStoreOptions,ready,candidateId,clean,validateEmail} from './_utils.mjs';
+import {triage,dataFromSubmission,statusValues} from './triage.mjs';
+import {normalizeCV,candidateHasCV,safeCandidateSummary} from './_cv.mjs';
+const response=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
+const allowedActions=new Set(['set-status','note','invite','import']);
+function auth(request){
+ const bearer=(request.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
+ return secureTokenEqual(env('HNS_ADMIN_TOKEN'),bearer);
+}
+function sanitize(r){return {...safeCandidateSummary(r),triage:triage(r)};}
+function timeEvent(action,extra={}){return {at:new Date().toISOString(),action,...extra};}
+async function modify(store,id,updater){
+ const data=await store.get(id,{type:'json'});if(!data)return null;
+ const meta=await store.getMetadata(id);if(!meta?.etag)return {conflict:true};
+ const next=updater(data);const result=await store.setJSON(id,next,{onlyIfMatch:meta.etag});
+ return result.modified?{record:next}:{conflict:true};
+}
+export default async(request)=>{
+ if(process.env.CONTEXT&&process.env.CONTEXT!=='production')return response({error:'Disponible uniquement en production'},403);
+ if(!['GET','POST'].includes(request.method))return response({error:'Méthode non autorisée'},405);
+ const origin=request.headers.get('origin');if(origin && origin!==new URL(request.url).origin)return response({error:'Origine refusée'},403);
+ if(!auth(request))return response({error:'Accès non autorisé'},401);
+ try{
+  const store=getStore(openStoreOptions());
+  if(request.method==='GET'){
+   const {blobs}=await store.list();if(blobs.length>700)return response({error:'Capacité de l’outil atteinte; contacter l’administrateur'},422);
+   const records=(await Promise.all(blobs.map(x=>store.get(x.key,{type:'json'})))).filter(Boolean).map(sanitize).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+   return response({records,emailReady:ready(),formName:'hns-ai-candidates-2026',count:records.length});
+  }
+  const body=await request.json().catch(()=>null);
+  if(!body || !allowedActions.has(body.action))return response({error:'Action invalide'},400);
+  if(body.action==='import'){
+   const entries=body.records;if(!Array.isArray(entries)||entries.length<1||entries.length>200)return response({error:'Import limité à 200 dossiers par lot'},422);
+   let imported=0,skipped=0;
+   for(const raw of entries){const source=raw.data??raw;const data=dataFromSubmission(source),email=data.email.toLowerCase();const cvFile=normalizeCV(source.cv),hasCV=candidateHasCV(source.cv);if(!validateEmail(email)||!data.name){skipped++;continue;}
+    const id=candidateId(email),now=new Date().toISOString();const record={id,email,name:clean(data.name,120),school:clean(data.school,150),track:clean(data.track,100),data,cvFile,hasCV,status:'received',source:'netlify-csv-import',createdAt:raw.created_at&&/^\d{4}-\d\d-\d\d/.test(raw.created_at)?clean(raw.created_at,40):now,updatedAt:now,ackSentAt:null,invitedAt:null,notes:[],history:[timeEvent('imported')]};
+    const r=await store.setJSON(id,record,{onlyIfNew:true});
+    if(r.modified){imported++;}else{ // Backfill a CV reference from an older Netlify CSV, without overwriting RH decisions.
+      const old=await store.get(id,{type:'json'});const meta=await store.getMetadata(id);
+      if(cvFile && old && !old.cvFile && meta?.etag){const updated=await store.setJSON(id,{...old,cvFile,hasCV:true},{onlyIfMatch:meta.etag});updated.modified?imported++:skipped++;}else skipped++;
+    }
+   }
+   return response({ok:true,imported,skipped});
+  }
+  if(typeof body.id!=='string'||!/^[a-f0-9]{64}$/.test(body.id))return response({error:'Dossier invalide'},400);
+  if(body.action==='set-status'){
+   const status=body.status;if(!statusValues.includes(status)||status==='invited')return response({error:'Statut invalide'},422);
+   const result=await modify(store,body.id,r=>{
+    if(r.status==='invited'&&!['confirmed','interview'].includes(status))throw Error('Invitation déjà envoyée; action bloquée');
+    return {...r,status,updatedAt:new Date().toISOString(),history:[...(r.history||[]),timeEvent('status',{value:status})].slice(-80)};});
+   if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
+  }
+  if(body.action==='note'){
+   const note=clean(body.note,1200);if(note.length<3)return response({error:'Commentaire trop court'},422);
+   const result=await modify(store,body.id,r=>({...r,notes:[...(r.notes||[]),{at:new Date().toISOString(),text:note}].slice(-30),updatedAt:new Date().toISOString(),history:[...(r.history||[]),timeEvent('note')].slice(-80)}));
+   if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
+  }
+  return response({error:'Utilisez le pass H&S dans la fiche candidat. Ancien envoi désactivé.'},503);
+ }catch(err){console.error('H&S RH admin:',err?.message||err);return response({error:'Erreur serveur lors de la gestion RH'},500);}
+};
