@@ -189,6 +189,12 @@ export default async function handler(request){
    return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!p.team).map(p=>({id:p.id,alias:p.alias})),choice:rec.matchChoice||null,team:rec.team||null});
   }
   if(action==='matching-choice'){
+   const lock=await db.setJSON('matching-lock',{at:Date.now()},{onlyIfNew:true});
+   if(!lock?.modified)return fail('Matching occupé, réessayez dans un instant',409);
+   try{
+   const current=await db.get(key,{type:'json'});
+   if(!current||current.status!=='active')return fail('Accès désactivé',403);
+   Object.assign(rec,current);
    if(rec.team||rec.submitted)return fail('Choix déjà verrouillé',409);
    if(validId(rec.matchChoice)){
     const existingTeam=await db.get('team-'+hash([auth.id,rec.matchChoice].sort().join(':')).slice(0,32),{type:'json'});
@@ -214,6 +220,7 @@ export default async function handler(request){
    const teamKey='team-'+teamId;
    await db.setJSON(teamKey,{members,alias:'Binôme '+teamId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});
    return json({choice:target,mutual:true,teamId});
+   }finally{await db.delete('matching-lock')}
   }
   if(action==='load'){
    let dossier=rec,teamId=null;
