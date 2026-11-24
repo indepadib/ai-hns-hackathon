@@ -1,0 +1,25 @@
+name: Production release preflight
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check deployment credential without exposing it
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::notice::No GitHub deployment credential configured; link the existing Netlify project or configure a dedicated deployment secret."
+            echo "### Production deployment credential: unavailable" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Production deployment credential: configured (permissions not yet verified)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Document fixed target
+        run: |
+          echo "Production target: ai.hns.ma / 33dae2ce-086d-4470-b6fe-248f3ca49b70" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow does not deploy, read candidates, or send email." >> "$GITHUB_STEP_SUMMARY"
