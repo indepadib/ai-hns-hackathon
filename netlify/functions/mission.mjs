@@ -485,7 +485,7 @@ export default async function handler(request,context){
    const matching=await db.get('matching-state-v2',{type:'json'});
    const id=matching?.teams?.[auth.id];
    if(id){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===id);await db.setJSON('team-'+id,{members,alias:'Binôme '+id.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});dossier=await db.get('team-'+id,{type:'json'});teamId=id;}
-   return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,teamId});
+   return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,receipt:dossier.submitted?'HNS-'+(teamId||auth.id).slice(0,8).toUpperCase():null,teamId});
   }
   let dossierKey=key;
   const matching=await db.get('matching-state-v2',{type:'json'});const matchedId=matching?.teams?.[auth.id];if(['save','submit'].includes(action)&&Object.hasOwn(body,'teamId')&&(body.teamId||null)!==(matchedId||null))return fail('Votre équipe a changé. Rechargez le dossier partagé avant de poursuivre.',409,'TEAM_CHANGED');if(matchedId){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===matchedId);dossierKey='team-'+matchedId;await db.setJSON(dossierKey,{members,alias:'Binôme '+matchedId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});}
@@ -503,18 +503,25 @@ export default async function handler(request,context){
   if(action==='save'){
    if(!isOpen('challenge')&&!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
    if(dossier.submitted)return fail('Dossier déjà soumis',409);
-   if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const w=body.workspace;if(!w||typeof w!=='object'||Array.isArray(w))return fail('Dossier invalide');
+   const requestId=body.requestId;
+   if(requestId!==undefined&&(typeof requestId!=='string'||!/^[a-f0-9-]{36}$/.test(requestId)))return fail('Référence de sauvegarde invalide',400);
+   const fingerprint=hash(JSON.stringify(w));
+   if(requestId&&dossier.lastSave?.id===requestId&&dossier.lastSave.actor===auth.id){
+    if(dossier.lastSave.baseVersion!==body.version||dossier.lastSave.fingerprint!==fingerprint)return fail('Référence réutilisée pour un contenu différent',409,'VERSION_CONFLICT');
+    return json({version:dossier.version,savedAt:dossier.updatedAt,replayed:true});
+   }
+   if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
    const stageFor={problem:'problem',solution:'solution',tasks:'build',tests:'build',decisions:'build',redteam:'redteam',audit:'redteam',submission:'pitch',challenge:'challenge'};const clean={...dossier.workspace};for(const k of allowed)if(w[k]!==undefined&&isOpen(stageFor[k]))clean[k]=w[k];
    if(clean.tests?.benchmark){const b=clean.tests.benchmark;if(!b.report||b.report.challenge!==clean.challenge?.id){delete clean.tests.benchmark}else if(typeof b.signature!=='string'||!equal(b.signature,benchmarkSignature(b.report,dossierKey,secret)))return fail('Rapport de benchmark non authentifié. Relancez l’évaluation.',400,'BENCHMARK_INVALID');}
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
-   dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();
+   dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();dossier.lastSave=requestId?{id:requestId,actor:auth.id,baseVersion:body.version,fingerprint}:null;
    const write=await db.setJSON(dossierKey,dossier,{onlyIfMatch:metadata.etag});if(!write?.modified)return fail('Modification concurrente : rechargez le dossier',409,'VERSION_CONFLICT');
    return json({version:dossier.version,savedAt:dossier.updatedAt});
   }
   if(action==='submit'){
-   if(dossier.submitted)return fail('Dossier déjà soumis',409);
+   if(dossier.submitted){if(body.version===(dossier.version||0))return json({submittedAt:dossier.submittedAt,receipt:'HNS-'+dossierKey.split('-').pop().slice(0,8).toUpperCase(),replayed:true});return fail('Dossier déjà soumis',409);}
    if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Version de dossier obsolète',409,'VERSION_CONFLICT');
    const w=dossier.workspace||{};
    if(!String(w.problem?.summary||'').trim()||!String(w.solution?.summary||'').trim()||!String(w.submission?.result||'').trim())return fail('Problème, solution et résultat final obligatoires');
