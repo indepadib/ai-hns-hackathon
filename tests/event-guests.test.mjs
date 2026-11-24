@@ -39,3 +39,20 @@ test('Guest email escapes content and validates slot and role',()=>{
  assert.ok(!guestMail({...g,id:'a'.repeat(32)},'S'.repeat(40)).html.includes('<script>'));
  assert.throws(()=>validateGuest({...g,slot:'25:00'}));assert.throws(()=>validateGuest({...g,role:'admin'}));
 });
+
+test('Business Talk invitations carry the six-vertical brief and only invited speakers can submit presentation links',async()=>{
+ const {call,secret}=fixture();
+ const fields={name:'Synthetic BU representative',email:'bu@example.invalid',role:'business',vertical:'retail',session:'Nos enjeux métiers',slot:'10:50'};
+ assert.throws(()=>validateGuest({...fields,vertical:''}));
+ assert.throws(()=>validateGuest({...fields,vertical:'unknown'}));
+ const created=await call('guest-create',{guest:fields});assert.equal(created.status,201);
+ const {id,version}=created.value.guest,token=guestToken(id,secret);
+ const preview=await call('guest-preview',{id});assert.match(preview.value.mail.subject,/One Retail/);assert.match(preview.value.mail.text,/4 slides recommandées/);assert.match(preview.value.mail.text,/Trois problématiques/);assert.match(preview.value.mail.html,/Préparation de votre intervention/);
+ const materials={title:'Business Talk',link:'https://example.invalid/slides',notes:'Version de travail'};
+ assert.equal((await call('guest-materials',{token,materials},null)).status,404);
+ assert.equal((await call('guest-send',{id,version,confirm:true})).status,200);
+ assert.equal((await call('guest-materials',{token,materials:{...materials,link:'javascript:alert(1)'}},null)).status,400);
+ assert.equal((await call('guest-materials',{token,materials},null)).status,200);
+ const row=(await call('guest-list')).value.guests[0];assert.equal(row.materials.link,materials.link);assert.equal(row.vertical,'retail');assert.equal(row.rsvp,'pending');
+ const read=await call('guest-rsvp-read',{token},null);assert.equal(read.value.guest.brief.items.length,4);assert.equal(read.value.guest.canShareMaterials,true);assert.equal(read.value.guest.materials.title,materials.title);
+});
