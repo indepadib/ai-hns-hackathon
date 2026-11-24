@@ -26,6 +26,10 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   await rh.setJSON(candidateId,{id:candidateId,name:'TEST SYNTHETIC',email,status:'review',notes:[{text:'Preserve me'}],history:[]});
   const call=async(body,token='',host='ai.hns.ma')=>{const r=await handler(new Request('https://'+host+'/api/mission',{method:'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:JSON.stringify(body)}),{site:{id:'33dae2ce-086d-4470-b6fe-248f3ca49b70'},deploy:{context:'production'}});return {status:r.status,data:await r.json()}};
   const admin=env.HNS_ADMIN_TOKEN;
+  assert.equal((await call({action:'rh-session'})).status,403);
+  assert.equal((await call({action:'rh-session'},admin,'preview.example.invalid')).status,403);
+  const shared=await call({action:'rh-session'},admin);assert.equal(shared.status,200);assert.equal(shared.data.role,'rh');
+  assert.equal((await call({action:'me'},shared.data.token)).data.role,'rh');
   assert.equal((await call({action:'rh-pass-preview',candidateId})).status,403);
   assert.equal((await call({action:'rh-pass-preview',candidateId},admin)).status,409);
   await rh.setJSON(candidateId,{...(await rh.get(candidateId)),status:'selected'});
