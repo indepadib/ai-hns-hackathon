@@ -20,23 +20,24 @@ try{
     case 'guest-create':guests.push({id,...body.guest,version:0,mailStatus:'draft',rsvp:'pending'});out={guest:guests[0]};status=201;break;
     case 'guest-preview':out={guest:guests[0],mail:{subject:'Invitation H&S — Atelier',text:'Bonjour '+guests[0].name+' — '+guests[0].slot+'\n'+base+'/invites/#'+inviteToken}};break;
     case 'guest-send':assert.equal(body.confirm,true);sends++;guests[0].mailStatus='accepted';guests[0].version++;out={guest:guests[0]};break;
-    case 'guest-rsvp-read':case 'guest-rsvp':
+    case 'guest-materials':case 'guest-rsvp-read':case 'guest-rsvp':
       assert.equal(body.token,inviteToken);
       if(body.action==='guest-rsvp')guests[0].rsvp=body.response;
-      out={guest:{name:guests[0].name,role:'Animateur d’atelier',session:guests[0].session,slot:guests[0].slot,rsvp:guests[0].rsvp}};break;
+      if(body.action==='guest-materials')guests[0].materials=body.materials;
+      out={guest:{name:guests[0].name,role:'Représentant de verticale · Business Talk',vertical:'One Retail',session:guests[0].session,slot:guests[0].slot,rsvp:guests[0].rsvp,canShareMaterials:true,materials:guests[0].materials,brief:{duration:'7 minutes',format:'4 slides recommandées',items:['Notre métier','Notre réalité terrain','Trois problématiques','Notre ambition'],note:'Exemples concrets'}}};break;
     default:status=400;out={error:'Unexpected synthetic request '+body.action};
    }}
    await route.fulfill({status,json:out});
   });
   await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
   await page.goto(base+'/mission-control/');await page.locator('#guests-open').click();await page.locator('#guests-new').click();
-  const form=page.locator('.guest-form');await form.locator('[name=name]').fill('Intervenant fictif');await form.locator('[name=email]').fill('speaker@example.invalid');await form.locator('[name=role]').selectOption('workshop');await form.locator('[name=department]').fill('One Retail');await form.locator('[name=session]').fill('IA et opérations');await form.locator('[name=slot]').fill('13:30');
+  const form=page.locator('.guest-form');await form.locator('[name=name]').fill('Intervenant fictif');await form.locator('[name=email]').fill('speaker@example.invalid');await form.locator('[name=role]').selectOption('business');await form.locator('[name=vertical]').selectOption('retail');await form.locator('[name=department]').fill('One Retail');await form.locator('[name=session]').fill('IA et opérations');await form.locator('[name=slot]').fill('13:30');
   await form.locator('button[type=submit]').click();await page.locator('[data-guest-preview]').click();await page.locator('#guest-send').waitFor();assert.equal(sends,0);
   page.once('dialog',d=>d.accept());await page.locator('#guest-send').click();
   await page.locator('.guest-state').getByText('Réponse attendue',{exact:true}).waitFor();assert.equal(sends,1);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest center overflow');
   await page.screenshot({path:'browser-review/guest-center-'+viewport.width+'.png',fullPage:true});
-  await page.goto(base+'/invites/#'+inviteToken);await page.getByRole('button',{name:'Je confirme ma présence'}).click();await page.getByText('Votre participation est confirmée.').waitFor();assert.equal(guests[0].rsvp,'confirmed');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest RSVP overflow');assert.deepEqual(errors,[]);
+  await page.goto(base+'/invites/#'+inviteToken);await page.getByRole('button',{name:'Je confirme ma présence'}).click();await page.getByText('Votre participation est confirmée.').waitFor();assert.equal(guests[0].rsvp,'confirmed');await page.getByText('7 minutes · 4 slides recommandées').waitFor();await page.locator('.materials [name=title]').fill('Support fictif');await page.locator('.materials [name=link]').fill('https://example.invalid/slides');await page.getByRole('button',{name:'Transmettre mon support'}).click();await page.getByText('Support transmis à l’organisation.').waitFor();assert.equal(guests[0].materials.title,'Support fictif');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest RSVP overflow');assert.deepEqual(errors,[]);
   await page.screenshot({path:'browser-review/guest-rsvp-'+viewport.width+'.png',fullPage:true});await context.close();console.log('Guest invitation and RSVP verified:',viewport.width,'px');
  }
 }finally{await browser.close()}
