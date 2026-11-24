@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {eligible,validEmail,qrPayload,qrId,invitationEmail} from '../../lib/invitation-email.mjs';
 import OpenAI from 'openai';
 import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
@@ -23,9 +24,10 @@ const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
 const readEnv=name=>{const native=globalThis.Netlify?.env?.get(name);return (native||process.env[name]||'').trim()};
 const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
+async function recruitmentRows(){const key=readEnv('HNS_RECRUITMENT_KEY');if(!key)throw Error('Connexion recrutement non configurée');const response=await fetch('https://ai.hns.ma/.netlify/functions/candidates-admin',{headers:{Authorization:'Bearer '+key},redirect:'error',signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('Source recrutement indisponible');const payload=await response.json();const rows=Array.isArray(payload)?payload:payload.records||payload.candidates||payload.items;if(!Array.isArray(rows))throw Error('Format recrutement inconnu');return rows}
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
-async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
+async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:(await db.get('invitation-mail-'+entry.key.slice(12),{type:'json'}))?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
 const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
 export const config = { rateLimit: { action: 'rate_limit', windowLimit: 1800, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request){
@@ -46,6 +48,31 @@ export default async function handler(request){
  }
  try{
  const db=store();
+  if(action==='invitation-rsvp'){
+   const code=within(body.code,80).toUpperCase().replace(/[\s-]/g,'');
+   if(!/^[A-F0-9]{24}$/.test(code)||!['confirmed','declined'].includes(body.response))return fail('Code ou réponse invalide',400);
+   const key=participantKey(hash(code).slice(0,32));
+   for(let attempt=0;attempt<8;attempt++){
+    const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
+    if(!rec?.candidateId||!equal(rec.codeHash,hash(code))||rec.status!=='invited'||(new URL(request.url).hostname!=='ai.hns.ma'&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation indisponible ou déjà utilisée',404);
+    if(rec.rsvp===body.response)return json({rsvp:rec.rsvp,respondedAt:rec.respondedAt});
+    const next={...rec,rsvp:body.response,respondedAt:new Date().toISOString()};
+    const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
+    if(write?.modified)return json({rsvp:next.rsvp,respondedAt:next.respondedAt});
+   }
+   return fail('Réponse concurrente, réessayez',409);
+  }
+  if(action==='recruitment-status'){
+   const bridgeKey=readEnv('HNS_RECRUITMENT_BRIDGE_KEY');
+   if(bridgeKey.length<32||!equal(hash(String(request.headers.get('authorization')||'')),hash('Bearer '+bridgeKey)))return fail('Accès interdit',403);
+   if(!Array.isArray(body.candidateIds)||body.candidateIds.length>100||body.candidateIds.some(x=>typeof x!=='string'||!x||x.length>160))return fail('Références invalides');
+   const entries=await Promise.all([...new Set(body.candidateIds)].map(async candidateId=>{
+    const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32);
+    const rec=await db.get(participantKey(id),{type:'json'}),mail=await db.get('invitation-mail-'+id,{type:'json'});
+    return {candidateId,passStatus:rec?.status||'not_prepared',mailStatus:mail?.state||'not_sent',sentAt:mail?.acceptedAt||null,rsvp:rec?.rsvp||'pending',respondedAt:rec?.respondedAt||null,checkedInAt:rec?.checkedInAt||null,submitted:!!rec?.submitted};
+   }));
+   return json({entries});
+  }
   if(action==='participant-login'){
    const code=within(body.code,80).toUpperCase();
    if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide',401);
@@ -161,7 +188,7 @@ export default async function handler(request){
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   return json({participants:await listParticipants(db)});
+   return json({participants:await listParticipants(db),sendEnabled:new URL(request.url).hostname==='ai.hns.ma'&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&!!readEnv('HNS_RESEND_API_KEY')&&!!readEnv('HNS_INVITATION_FROM')});
   }
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
@@ -171,6 +198,42 @@ export default async function handler(request){
    do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const t=await db.get(entry.key,{type:'json'});if(!t)continue;(t.members||[]).forEach(id=>assigned.add(id));if(t.submitted)participants.push({id:entry.key.slice(5),alias:t.alias,team:(t.members||[]).map(id=>people.find(p=>p.id===id)?.alias||id).join(' / '),submittedAt:t.submittedAt,score:t.score||null})}cursor=page.cursor}while(cursor);
    return json({participants:participants.filter(p=>!assigned.has(p.id)).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
+  if(['invitation-email','invitation-send'].includes(action)){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   if(!validId(body.id))return fail('Identifiant invalide');
+   const rec=await db.get(participantKey(body.id),{type:'json'});
+   if(!rec?.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation indisponible',404);
+   const staging=new URL(request.url).hostname!=='ai.hns.ma';
+   if(action==='invitation-send'&&(staging||readEnv('HNS_INVITATION_SEND_ENABLED')!=='true'||body.confirm!==true))return fail('Envoi réel désactivé ou non confirmé',403);
+   let row;
+   if(staging&&auth.role==='admin'&&rec.candidateId.startsWith('TEST-'))row={name:rec.alias,email:'test@example.invalid',status:'selected'};
+   else {if(staging)return fail('Les emails de préproduction sont réservés aux profils TEST-',403);try{row=(await recruitmentRows()).find(x=>String(x.id)===rec.candidateId)}catch{return fail('Source recrutement indisponible',503)}}
+   if(!eligible(row))return fail('Candidat non validé par les RH',409);
+   const email=within(row.email,254);
+   if(!validEmail(email))return fail('Email candidat absent ou invalide',422);
+   const code=createHmac('sha256',secret).update('invitation-v1:'+rec.candidateId).digest('hex').slice(0,24).toUpperCase();
+   if(!equal(rec.codeHash,hash(code))||hash(code).slice(0,32)!==body.id)return fail('Invitation incohérente',409);
+   const qrCode=await QRCode.toDataURL(qrPayload(body.id,secret),{errorCorrectionLevel:'M',margin:4,width:320});
+   const participantUrl=staging?'https://hns-ai-challenge-staging.netlify.app/mission-control/':'https://ai.hns.ma/mission-control/';
+   const reference='HNS-'+body.id.slice(0,8).toUpperCase(),name=within(row.name||rec.alias,150);
+   const mail=invitationEmail({name,email,code,qrCode,participantUrl,reference,preview:staging});
+   if(action==='invitation-send'){
+    if(rec.status!=='invited'||rec.rsvp==='declined')return fail('Invitation non expédiable',409);
+    const apiKey=readEnv('HNS_RESEND_API_KEY'),from=readEnv('HNS_INVITATION_FROM');
+    if(!apiKey||!from||/[\r\n]/.test(from))return fail('Expéditeur non configuré',503);
+    const mailKey='invitation-mail-'+body.id,existing=await db.get(mailKey,{type:'json'});
+    if(existing)return json({mailStatus:existing.state,acceptedAt:existing.acceptedAt||null,duplicatePrevented:true});
+    const lock=await db.setJSON(mailKey,{state:'sending',startedAt:new Date().toISOString()},{onlyIfNew:true});
+    if(!lock?.modified)return fail('Envoi déjà enregistré',409);
+    try{
+     const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':'hns-invite-2026/'+body.id},body:JSON.stringify({from,to:[email],subject:mail.subject,html:mail.html,text:mail.text,attachments:[{filename:'pass.png',content:qrCode.split(',')[1],content_id:'hns-pass-qr',content_type:'image/png'}]}),redirect:'error',signal:AbortSignal.timeout(12000)});
+     const result=await response.json().catch(()=>null);
+     if(!response.ok||typeof result?.id!=='string'){await db.setJSON(mailKey,{state:'review_required',providerStatus:response.status,updatedAt:new Date().toISOString()});return fail('Envoi à contrôler dans le fournisseur avant toute relance',502)}
+     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,acceptedAt});return json({mailStatus:'accepted',acceptedAt});
+    }catch{await db.setJSON(mailKey,{state:'review_required',updatedAt:new Date().toISOString()});return fail('Résultat incertain : contrôler le fournisseur avant toute relance',502)}
+   }
+   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:!staging&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'});
+  }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const candidateId=within(body.candidateId,160);
@@ -178,11 +241,12 @@ export default async function handler(request){
    const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase();
    const id=hash(code).slice(0,32),rec=await db.get(participantKey(id),{type:'json'});
    if(!rec||rec.status==='revoked')return fail('Invitation indisponible',404);
-   const qrCode=await QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320});
+   const qrCode=await QRCode.toDataURL(qrPayload(id,secret),{errorCorrectionLevel:'M',margin:4,width:320});
    return json({id,alias:rec.alias,code,qrCode,status:rec.status,participantUrl:'https://ai.hns.ma/mission-control/'});
   }
   if(action==='sync-recruitment'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   if(new URL(request.url).hostname!=='ai.hns.ma')return fail('Synchronisation réelle réservée à la production',403);
    const recruitmentKey=readEnv('HNS_RECRUITMENT_KEY');
    if(!recruitmentKey)return fail('Connexion recrutement non configurée',503);
    const response=await fetch('https://ai.hns.ma/.netlify/functions/candidates-admin',{headers:{Authorization:'Bearer '+recruitmentKey},redirect:'error',signal:AbortSignal.timeout(15000)});
@@ -207,22 +271,25 @@ export default async function handler(request){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const candidateId=within(body.candidateId,160),alias=within(body.alias,70);
    if(!candidateId||!alias)return fail('Référence candidat et nom obligatoires');
+   const testOnly=new URL(request.url).hostname!=='ai.hns.ma';
+   if(!testOnly||auth.role!=='admin'||!candidateId.startsWith('TEST-')||!alias.startsWith('TEST-'))return fail('Création manuelle réservée aux tests en préproduction ; utiliser la synchronisation RH',403);
    const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase();
    const id=hash(code).slice(0,32),key=participantKey(id);
    const existing=await db.get(key,{type:'json'});
    if(existing?.status==='revoked')return fail('Invitation révoquée',409);
    if(!existing)await db.setJSON(key,{candidateId,alias,codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});
-   const qrCode=await QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320});
+   const qrCode=await QRCode.toDataURL(qrPayload(id,secret),{errorCorrectionLevel:'M',margin:4,width:320});
    return json({id,code,qrCode,alias:existing?.alias||alias,status:existing?.status||'invited'});
   }
   if(action==='scan-invitation'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const code=within(body.code,80).toUpperCase();
-   if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide');
-   const id=hash(code).slice(0,32),key=participantKey(id);
+   const signedId=qrId(code,secret),legacy=/^[A-F0-9]{24}$/.test(code);
+   if(!signedId&&!legacy)return fail('QR invalide');
+   const id=signedId||hash(code).slice(0,32),key=participantKey(id);
    for(let attempt=0;attempt<12;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec||!equal(rec.codeHash,hash(code))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
+    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status)||(new URL(request.url).hostname!=='ai.hns.ma'&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation inconnue ou révoquée',404);
     if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
     const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
@@ -236,7 +303,7 @@ export default async function handler(request){
    if(!validId(body.id))return fail('Identifiant invalide');
    const key=participantKey(body.id),rec=await db.get(key,{type:'json'});
    if(!rec)return fail('Participant inconnu',404);
-   rec.status='revoked';rec.revokedAt=new Date().toISOString();await db.setJSON(key,rec);return json({revoked:true});
+   for(let attempt=0;attempt<8;attempt++){const current=await db.getWithMetadata(key,{type:'json'});if(!current?.data)return fail('Participant inconnu',404);if(current.data.status==='revoked')return json({revoked:true});const result=await db.setJSON(key,{...current.data,status:'revoked',revokedAt:new Date().toISOString()},{onlyIfMatch:current.etag});if(result?.modified)return json({revoked:true})}return fail('Modification concurrente : réessayez',409);
   }
   if(['jury-holdout-inputs','jury-holdout-score','jury-holdout-status'].includes(action)){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
