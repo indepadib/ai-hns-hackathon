@@ -1,0 +1,42 @@
+import {chromium} from 'playwright';
+import assert from 'node:assert/strict';
+import {mkdir} from 'node:fs/promises';
+const browser=await chromium.launch({headless:true});const base='http://127.0.0.1:8765';
+await mkdir('browser-review',{recursive:true});
+try{
+ for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
+  const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  const guests=[];let sends=0;const id='a'.repeat(32),inviteToken=id+'.'+'b'.repeat(64);
+  await page.route('**/api/mission',async route=>{
+   const req=route.request();let out={},status=200;
+   if(req.method()==='GET')out={service:'hns-mission'};
+   else{const body=req.postDataJSON();switch(body.action){
+    case 'me':out={role:'admin'};break;
+    case 'staff-list':out={participants:[],sendEnabled:false};break;
+    case 'schedule':out={now:Date.now(),stages:[]};break;
+    case 'team-dashboard':out={teams:[]};break;
+    case 'guest-list':out={guests,sendEnabled:true};break;
+    case 'guest-create':guests.push({id,...body.guest,version:0,mailStatus:'draft',rsvp:'pending'});out={guest:guests[0]};status=201;break;
+    case 'guest-preview':out={guest:guests[0],mail:{subject:'Invitation H&S — Atelier',text:'Bonjour '+guests[0].name+' — '+guests[0].slot+'\n'+base+'/invites/#'+inviteToken}};break;
+    case 'guest-send':assert.equal(body.confirm,true);sends++;guests[0].mailStatus='accepted';guests[0].version++;out={guest:guests[0]};break;
+    case 'guest-rsvp-read':case 'guest-rsvp':
+      assert.equal(body.token,inviteToken);
+      if(body.action==='guest-rsvp')guests[0].rsvp=body.response;
+      out={guest:{name:guests[0].name,role:'Animateur d’atelier',session:guests[0].session,slot:guests[0].slot,rsvp:guests[0].rsvp}};break;
+    default:status=400;out={error:'Unexpected synthetic request '+body.action};
+   }}
+   await route.fulfill({status,json:out});
+  });
+  await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
+  await page.goto(base+'/mission-control/');await page.locator('#guests-open').click();await page.locator('#guests-new').click();
+  const form=page.locator('.guest-form');await form.locator('[name=name]').fill('Intervenant fictif');await form.locator('[name=email]').fill('speaker@example.invalid');await form.locator('[name=role]').selectOption('workshop');await form.locator('[name=department]').fill('One Retail');await form.locator('[name=session]').fill('IA et opérations');await form.locator('[name=slot]').fill('13:30');
+  await form.locator('button[type=submit]').click();await page.locator('[data-guest-preview]').click();await page.locator('#guest-send').waitFor();assert.equal(sends,0);
+  page.once('dialog',d=>d.accept());await page.locator('#guest-send').click();
+  await page.locator('.guest-state').getByText('Réponse attendue',{exact:true}).waitFor();assert.equal(sends,1);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest center overflow');
+  await page.screenshot({path:'browser-review/guest-center-'+viewport.width+'.png',fullPage:true});
+  await page.goto(base+'/invites/#'+inviteToken);await page.getByRole('button',{name:'Je confirme ma présence'}).click();await page.getByText('Votre participation est confirmée.').waitFor();assert.equal(guests[0].rsvp,'confirmed');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest RSVP overflow');assert.deepEqual(errors,[]);
+  await page.screenshot({path:'browser-review/guest-rsvp-'+viewport.width+'.png',fullPage:true});await context.close();console.log('Guest invitation and RSVP verified:',viewport.width,'px');
+ }
+}finally{await browser.close()}
