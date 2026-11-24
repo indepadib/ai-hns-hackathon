@@ -72,8 +72,22 @@ jobs:
                       try:
                           with urllib.request.urlopen(urllib.request.Request(root+urlpath,headers={'User-Agent':'HNS-source-recovery/1.0','Accept-Encoding':'identity'}),timeout=20) as response:
                               raw=response.read(2000000)
-                          if hashlib.sha256(raw).hexdigest()==digest:
-                              data=raw;break
+                          candidates=[raw]
+                          if name=='index.html':
+                              # Netlify's form detection removes attributes from served HTML.
+                              import re
+                              match=re.search(rb'<form\b[^>]*\bid="demoForm"[^>]*>',raw)
+                              if match:
+                                  original=b'<form id="demoForm" name="hns-ai-candidates-2026" method="POST" action="/merci" enctype="multipart/form-data" data-netlify="true" netlify-honeypot="bot-field">'
+                                  restored=raw[:match.start()]+original+raw[match.end():]
+                                  candidates.extend([restored,restored.replace(b'<input type="hidden" name="form-name" value="hns-ai-candidates-2026" />',b'<input type="hidden" name="form-name" value="hns-ai-candidates-2026"/>',1)])
+                              candidates += [v.rstrip(b'\n')+b'\n' for v in candidates[:]]
+                          for variant in candidates:
+                              if hashlib.sha256(variant).hexdigest()==digest:
+                                  data=variant;break
+                          if data is not None:break
+                          if name=='index.html':
+                              print('Index diagnostic:',len(raw),repr(match.group(0) if match else b'no form'),hashlib.sha256(raw).hexdigest(),flush=True)
                       except Exception:pass
                   if data is not None:break
               if data is None:
