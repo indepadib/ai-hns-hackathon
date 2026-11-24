@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
+import {teamSignals} from '../../lib/team-signals.mjs';
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 const fail=(message,status=400,code='REQUEST_FAILED')=>json({error:message,code},status);
 const hash=value=>createHash('sha256').update(String(value)).digest('hex');
@@ -71,15 +72,22 @@ export default async function handler(request){
      const t=await db.get(entry.key,{type:'json'});
      if(!t||!Array.isArray(t.members))continue;
      t.members.forEach(id=>assigned.add(id));
-     teams.push({id:entry.key.slice(5),alias:t.alias,members:t.members.map(id=>people.find(p=>p.id===id)?.alias||id),submitted:!!t.submitted,submittedAt:t.submittedAt||null,score:t.score||null,progress:Object.keys(t.workspace||{}).filter(k=>JSON.stringify(t.workspace[k]).length>10).length});
+     teams.push({id:entry.key.slice(5),alias:t.alias,members:t.members.map(id=>people.find(p=>p.id===id)?.alias||id),submitted:!!t.submitted,submittedAt:t.submittedAt||null,score:t.score||null,progress:teamSignals(t.workspace).documented,signals:teamSignals(t.workspace),updatedAt:t.updatedAt||null,challenge:t.workspace?.challenge?.id||null});
     }
     cursor=page.cursor;
    }while(cursor);
    for(const p of people.filter(p=>p.status==='active'&&!assigned.has(p.id))){
     const rec=await db.get(participantKey(p.id),{type:'json'});
-    teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:Object.keys(rec?.workspace||{}).filter(k=>JSON.stringify(rec.workspace[k]).length>10).length});
+    teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:teamSignals(rec?.workspace).documented,signals:teamSignals(rec?.workspace),updatedAt:rec?.updatedAt||null,challenge:rec?.workspace?.challenge?.id||null});
    }
    return json({teams:teams.filter(t=>auth.role==='admin'||t.submitted).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
+  }
+  if(action==='team-inspect'){
+   if(auth.role!=='admin')return fail('Accès administrateur requis',403);
+   if(!validId(body.id))return fail('Identifiant invalide');
+   const team=await db.get('team-'+body.id,{type:'json'}),rec=team||await db.get(participantKey(body.id),{type:'json'});
+   if(!rec||(!team&&rec.status!=='active'))return fail('Dossier indisponible',404);
+   return json({alias:rec.alias,workspace:rec.workspace||{},signals:teamSignals(rec.workspace),submitted:!!rec.submitted,score:rec.score||null});
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
