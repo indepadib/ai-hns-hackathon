@@ -189,54 +189,39 @@ export default async function handler(request){
    return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!p.team).map(p=>({id:p.id,alias:p.alias})),choice:rec.matchChoice||null,team:rec.team||null});
   }
   if(action==='matching-choice'){
-   const lock=await db.setJSON('matching-lock',{at:Date.now()},{onlyIfNew:true});
-   if(!lock?.modified)return fail('Matching occupé, réessayez dans un instant',409);
-   try{
-   const current=await db.get(key,{type:'json'});
-   if(!current||current.status!=='active')return fail('Accès désactivé',403);
-   Object.assign(rec,current);
-   if(rec.team||rec.submitted)return fail('Choix déjà verrouillé',409);
-   if(validId(rec.matchChoice)){
-    const existingTeam=await db.get('team-'+hash([auth.id,rec.matchChoice].sort().join(':')).slice(0,32),{type:'json'});
-    if(existingTeam?.members?.includes(auth.id))return fail('Binôme déjà constitué',409);
-   }
-   if(!rec.checkedInAt)return fail('Présence requise',403);
    const target=body.target;
    if(target!=='solo'&&(!validId(target)||target===auth.id))return fail('Choix invalide');
+   if(!rec.checkedInAt||rec.status!=='active')return fail('Présence requise',403);
    if(target!=='solo'){
     const peer=await db.get(participantKey(target),{type:'json'});
-    if(!peer||peer.status!=='active'||!peer.checkedInAt||peer.team)return fail('Participant indisponible',409);
-    if(validId(peer.matchChoice)){
-     const existingTeam=await db.get('team-'+hash([target,peer.matchChoice].sort().join(':')).slice(0,32),{type:'json'});
-     if(existingTeam?.members?.includes(target))return fail('Participant déjà en binôme',409);
-    }
+    if(!peer||peer.status!=='active'||!peer.checkedInAt)return fail('Participant indisponible',409);
    }
-   rec.matchChoice=target;
-   await db.setJSON(key,rec);
-   if(target==='solo')return json({choice:target,mutual:false});
-   const peer=await db.get(participantKey(target),{type:'json'});
-   if(peer?.matchChoice!==auth.id)return json({choice:target,mutual:false});
-   const members=[auth.id,target].sort(),teamId=hash(members.join(':')).slice(0,32);
-   const teamKey='team-'+teamId;
-   await db.setJSON(teamKey,{members,alias:'Binôme '+teamId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});
-   return json({choice:target,mutual:true,teamId});
-   }finally{await db.delete('matching-lock')}
+   for(let attempt=0;attempt<80;attempt++){
+    const meta=await db.getWithMetadata('matching-state-v2',{type:'json'});
+    const state=meta?.data||{choices:{},teams:{}};
+    const choices={...state.choices},teams={...state.teams};
+    if(teams[auth.id]||(target!=='solo'&&teams[target]))return fail('Binôme déjà constitué',409);
+    choices[auth.id]=target;
+    let teamId=null;
+    if(target!=='solo'&&choices[target]===auth.id){
+     teamId=hash([auth.id,target].sort().join(':')).slice(0,32);
+     teams[auth.id]=teamId;teams[target]=teamId;
+    }
+    const write=await db.setJSON('matching-state-v2',{choices,teams},meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
+    if(!write?.modified)continue;
+    return json({choice:target,mutual:!!teamId,teamId});
+   }
+   return fail('Matching occupé, réessayez',409);
   }
   if(action==='load'){
    let dossier=rec,teamId=null;
-   if(validId(rec.matchChoice)){
-    const members=[auth.id,rec.matchChoice].sort(),id=hash(members.join(':')).slice(0,32);
-    const team=await db.get('team-'+id,{type:'json'});
-    if(team?.members?.includes(auth.id)){dossier=team;teamId=id}
-   }
+   const matching=await db.get('matching-state-v2',{type:'json'});
+   const id=matching?.teams?.[auth.id];
+   if(id){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===id);await db.setJSON('team-'+id,{members,alias:'Binôme '+id.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});dossier=await db.get('team-'+id,{type:'json'});teamId=id;}
    return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,teamId});
   }
   let dossierKey=key;
-  if(validId(rec.matchChoice)){
-   const id=hash([auth.id,rec.matchChoice].sort().join(':')).slice(0,32);
-   const team=await db.get('team-'+id,{type:'json'});
-   if(team?.members?.includes(auth.id))dossierKey='team-'+id;
-  }
+  const matching=await db.get('matching-state-v2',{type:'json'});const matchedId=matching?.teams?.[auth.id];if(matchedId){const members=Object.keys(matching.teams).filter(k=>matching.teams[k]===matchedId);dossierKey='team-'+matchedId;await db.setJSON(dossierKey,{members,alias:'Binôme '+matchedId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});}
   const metadata=await db.getWithMetadata(dossierKey,{type:'json'});
   if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
   const dossier=metadata.data;
