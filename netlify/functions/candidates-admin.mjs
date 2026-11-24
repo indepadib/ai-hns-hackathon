@@ -45,9 +45,9 @@ export default async(request,context)=>{
   }
   if(typeof body.id!=='string'||!/^[a-f0-9]{64}$/.test(body.id))return response({error:'Dossier invalide'},400);
   if(body.action==='set-status'){
-   const status=body.status;if(!statusValues.includes(status)||status==='invited')return response({error:'Statut invalide'},422);
+   const status=body.status;if(!statusValues.includes(status)||['invited','confirmed'].includes(status))return response({error:'Les statuts Invité et Confirmé sont réservés au parcours invitation / participation. Utilisez Sélectionné pour valider un candidat.'},422);
    const result=await modify(store,body.id,r=>{
-    if(r.status==='invited'&&!['confirmed','interview'].includes(status))throw Error('Invitation déjà envoyée; action bloquée');
+    if(r.invitedAt||['invited','confirmed'].includes(r.status))throw Error('Dossier déjà invité ou historique à corriger via le module dédié.');
     return {...r,status,updatedAt:new Date().toISOString(),history:[...(r.history||[]),timeEvent('status',{value:status})].slice(-80)};});
    if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
   }
