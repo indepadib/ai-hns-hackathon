@@ -250,7 +250,10 @@ export default async function handler(request){
      const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':'hns-invite-2026/'+body.id},body:JSON.stringify({from,to:[email],subject:mail.subject,html:mail.html,text:mail.text,attachments:[{filename:'pass.png',content:qrCode.split(',')[1],content_id:'hns-pass-qr',content_type:'image/png'}]}),redirect:'error',signal:AbortSignal.timeout(12000)});
      const result=await response.json().catch(()=>null);
      if(!response.ok||typeof result?.id!=='string'){await db.setJSON(mailKey,{state:'review_required',providerStatus:response.status,updatedAt:new Date().toISOString()});return fail('Envoi à contrôler dans le fournisseur avant toute relance',502)}
-     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,acceptedAt});return json({mailStatus:'accepted',acceptedAt});
+     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,acceptedAt});
+     let recruitmentUpdated=false;
+     try{const rh=recruitmentStore();for(let attempt=0;attempt<4;attempt++){const current=await rh.getWithMetadata(rec.candidateId,{type:'json'});if(!current?.data)break;if(current.data.invitedAt){recruitmentUpdated=true;break}if(current.data.status!=='selected')break;const next={...current.data,status:'invited',invitedAt:acceptedAt,updatedAt:acceptedAt,history:[...(current.data.history||[]),{at:acceptedAt,action:'invited',via:'mission-control'}].slice(-80)};const write=await rh.setJSON(rec.candidateId,next,{onlyIfMatch:current.etag});if(write.modified){recruitmentUpdated=true;break}}}catch{console.error('HNS_INVITE_RH_RECONCILIATION_REQUIRED')}
+     return json({mailStatus:'accepted',acceptedAt,recruitmentUpdated});
     }catch{await db.setJSON(mailKey,{state:'review_required',updatedAt:new Date().toISOString()});return fail('Résultat incertain : contrôler le fournisseur avant toute relance',502)}
    }
    return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
