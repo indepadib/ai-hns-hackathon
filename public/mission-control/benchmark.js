@@ -7,7 +7,9 @@ const descriptions={
  loyalty:{title:'Prévoir le retour des clients',labels:['no','yes'],description:'Prévoir un achat pendant les 14 derniers jours à partir des 70 premiers. Le consentement marketing reste une contrainte distincte.',baseline:'Achat dans les 14 jours avant la coupure.'},
  inspection:{title:'Prioriser les observations rayon',labels:['normal','review'],description:'Tri des relevés structurés selon une règle de référence, sans mesure de performance vision.',baseline:'Contrôle humain systématique.'}
 };
+for(const topic of root.HNSVerticals?.topics||[])descriptions[topic.id]={title:topic.title,labels:['no','yes'],description:'Classification synthétique : '+topic.outcome+'.',baseline:'Seuil simple sur '+topic.features[0][0]+'.'};
 function dataset(id,t){
+ if(root.HNSVerticals?.get(id))return root.HNSVerticals.dataset(id);
  const meta=descriptions[id];if(!Object.hasOwn(descriptions,id))throw Error('Challenge inconnu.');
  const rows=[];
  if(id==='availability'){
