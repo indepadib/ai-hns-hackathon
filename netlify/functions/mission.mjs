@@ -169,9 +169,21 @@ export default async function handler(request){
    await db.setJSON(key,rec);
    if(target==='solo')return json({choice:target,mutual:false});
    const peer=await db.get(participantKey(target),{type:'json'});
-   return json({choice:target,mutual:peer?.matchChoice===auth.id});
+   if(peer?.matchChoice!==auth.id)return json({choice:target,mutual:false});
+   const members=[auth.id,target].sort(),teamId=hash(members.join(':')).slice(0,32);
+   const teamKey='team-'+teamId;
+   await db.setJSON(teamKey,{members,alias:'Binôme '+teamId.slice(0,6).toUpperCase(),workspace:{},version:0,submitted:false},{onlyIfNew:true});
+   return json({choice:target,mutual:true,teamId});
   }
-  if(action==='load')return json({workspace:rec.workspace||{},version:rec.version||0,submitted:!!rec.submitted,submittedAt:rec.submittedAt||null});
+  if(action==='load'){
+   let dossier=rec,teamId=null;
+   if(validId(rec.matchChoice)){
+    const members=[auth.id,rec.matchChoice].sort(),id=hash(members.join(':')).slice(0,32);
+    const team=await db.get('team-'+id,{type:'json'});
+    if(team?.members?.includes(auth.id)){dossier=team;teamId=id}
+   }
+   return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,teamId});
+  }
   if(action==='save'){
    if(rec.submitted)return fail('Dossier déjà soumis',409);
    if(!Number.isInteger(body.version)||body.version!==(rec.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
