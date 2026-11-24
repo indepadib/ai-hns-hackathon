@@ -75,6 +75,13 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   const submitted=await call({action:'submit',version:1,teamId:null},pt);assert.equal(submitted.status,200,JSON.stringify(submitted.data));
   const again=await call({action:'submit',version:1,teamId:null},pt);assert.equal(again.status,200);assert.equal(again.data.receipt,submitted.data.receipt);
   const loaded=await call({action:'load'},pt);assert.equal(loaded.data.receipt,submitted.data.receipt);assert.deepEqual(loaded.data.workspace,workspace);
+  const juryLogin=await call({action:'jury-login',password:env.HNS_JURY_KEY});assert.equal(juryLogin.status,200);const jt=juryLogin.data.token;
+  const scores={problem:80,design:70,build:90,test:60,demo:100};
+  assert.equal((await call({action:'jury-score',id,scores,expectedScoredAt:null},pt)).status,403);
+  const firstScore=await call({action:'jury-score',id,scores,expectedScoredAt:null},jt);assert.equal(firstScore.status,200,JSON.stringify(firstScore.data));assert.equal(firstScore.data.score.total,79.5);
+  const stale=await call({action:'jury-score',id,scores:{...scores,problem:0},expectedScoredAt:null},jt);assert.equal(stale.status,409);assert.equal(stale.data.code,'JURY_CONFLICT');
+  const dossier=await call({action:'jury-dossier',id},jt);assert.equal(dossier.data.score.total,79.5);
+  const updatedScore=await call({action:'jury-score',id,scores:{...scores,problem:90},expectedScoredAt:firstScore.data.score.scoredAt},jt);assert.equal(updatedScore.status,200);assert.equal(updatedScore.data.score.total,81.5);
   const after=await call({action:'recruitment-status',candidateIds:[candidateId]},admin);assert.ok(after.data.entries[0].checkedInAt);
   assert.equal((await call({action:'revoke',id},token)).status,200);assert.equal((await call({action:'participant-login',code})).status,401);
  }finally{globalThis.fetch=oldFetch;for(const [k,v] of Object.entries(oldEnv)){if(v===undefined)delete process.env[k];else process.env[k]=v}await Promise.all([unlink(mock).catch(()=>{}),unlink(entry).catch(()=>{})]);}
