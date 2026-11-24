@@ -230,7 +230,7 @@ export default async function handler(request){
   if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
   const dossier=metadata.data;
   if(action==='save'){
-   if(!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
+   if(!isOpen('challenge')&&!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
    if(dossier.submitted)return fail('Dossier déjà soumis',409);
    if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const w=body.workspace;if(!w||typeof w!=='object'||Array.isArray(w))return fail('Dossier invalide');
