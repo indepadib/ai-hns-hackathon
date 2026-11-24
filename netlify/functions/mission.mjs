@@ -24,13 +24,13 @@ const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
 const readEnv=name=>{const native=globalThis.Netlify?.env?.get(name);return (native||process.env[name]||'').trim()};
 const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
-const isLive=request=>new URL(request.url).hostname==='ai.hns.ma'&&readEnv('CONTEXT')==='production'&&readEnv('HNS_UNIFIED_PRODUCTION')==='true';
+const isLive=(request,context)=>new URL(request.url).hostname==='ai.hns.ma'&&context?.site?.id==='33dae2ce-086d-4470-b6fe-248f3ca49b70'&&context?.deploy?.context==='production'&&readEnv('HNS_UNIFIED_PRODUCTION')==='true';
 const recruitmentStore=()=>getStore({name:'hns-ai-recruitment-2026',region:'eu-central-1',consistency:'strong'});
 const validCandidateId=id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id);
 const recruitmentCandidate=async id=>validCandidateId(id)?recruitmentStore().get(id,{type:'json'}):null;
 async function recruitmentRows(){const db=recruitmentStore(),{blobs}=await db.list();if(blobs.length>700)throw Error('Capacité recrutement dépassée');return (await Promise.all(blobs.map(x=>db.get(x.key,{type:'json'})))).filter(Boolean)}
 const mailProvider=()=>({apiKey:readEnv('HNS_RESEND_API_KEY')||readEnv('RESEND_API_KEY'),from:readEnv('HNS_INVITATION_FROM')||readEnv('HNS_EMAIL_FROM')});
-const canSend=request=>isLive(request)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&Object.values(mailProvider()).every(Boolean);
+const canSend=(request,context)=>isLive(request,context)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&Object.values(mailProvider()).every(Boolean);
 const isRecruitmentAdmin=request=>{const key=readEnv('HNS_ADMIN_TOKEN');return key.length>=32&&equal(hash(String(request.headers.get('authorization')||'')),hash('Bearer '+key))};
 async function ensurePass(db,row,secret){const candidateId=row.id;if(!validCandidateId(candidateId)||!eligible(row))return null;const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32),key=participantKey(id);await db.setJSON(key,{candidateId,alias:within(row.name,70),codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});return id}
 const scoresNames=['problem','design','build','test','demo'];
@@ -38,7 +38,7 @@ function store(){return getStore({name:'hns-ai-mission-control',consistency:'str
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:(await db.get('invitation-mail-'+entry.key.slice(12),{type:'json'}))?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
 const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
 export const config = { rateLimit: { action: 'rate_limit', windowLimit: 1800, windowSize: 60, aggregateBy: ['ip'] } };
-export default async function handler(request){
+export default async function handler(request,context){
  if(request.method==='GET'){const ready=readEnv('HNS_SESSION_SECRET').length>=32&&Object.values(env).every(name=>readEnv(name).length>=8);console.info('HNS_RUNTIME_HEALTH',JSON.stringify(Object.fromEntries(['HNS_SESSION_SECRET',...Object.values(env)].map(name=>[name,!readEnv(name)?'missing':readEnv(name).length<(name==='HNS_SESSION_SECRET'?32:8)?'too_short':'ready']))));return json({status:ready?'ok':'configuration_required',service:'hns-mission',version:'runtime-health-v2'},ready?200:503)}
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
  if(Number(request.headers.get('content-length')||0)>250000)return fail('Requête trop volumineuse',413);
@@ -62,8 +62,8 @@ export default async function handler(request){
    const key=participantKey(hash(code).slice(0,32));
    for(let attempt=0;attempt<8;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec?.candidateId||!equal(rec.codeHash,hash(code))||rec.status!=='invited'||(!isLive(request)&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation indisponible ou déjà utilisée',404);
-    if(isLive(request)&&!eligible(await recruitmentCandidate(rec.candidateId)))return fail('Invitation indisponible',404);
+    if(!rec?.candidateId||!equal(rec.codeHash,hash(code))||rec.status!=='invited'||(!isLive(request,context)&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation indisponible ou déjà utilisée',404);
+    if(isLive(request,context)&&!eligible(await recruitmentCandidate(rec.candidateId)))return fail('Invitation indisponible',404);
     if(rec.rsvp===body.response)return json({rsvp:rec.rsvp,respondedAt:rec.respondedAt});
     const next={...rec,rsvp:body.response,respondedAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
@@ -72,7 +72,7 @@ export default async function handler(request){
    return fail('Réponse concurrente, réessayez',409);
   }
   if(action==='recruitment-status'){
-   if(!isLive(request))return fail('Synchronisation RH désactivée dans cet environnement',403);
+   if(!isLive(request,context))return fail('Synchronisation RH désactivée dans cet environnement',403);
    const bridgeKey=readEnv('HNS_RECRUITMENT_BRIDGE_KEY');
    if(!isRecruitmentAdmin(request)&&(bridgeKey.length<32||!equal(hash(String(request.headers.get('authorization')||'')),hash('Bearer '+bridgeKey))))return fail('Accès interdit',403);
    if(!Array.isArray(body.candidateIds)||body.candidateIds.length>100||body.candidateIds.some(x=>!validCandidateId(x)))return fail('Références invalides');
@@ -88,17 +88,17 @@ export default async function handler(request){
    if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide',401);
    const id=hash(code).slice(0,32),rec=await db.get(participantKey(id),{type:'json'});
    if(!rec||!equal(rec.codeHash,hash(code))||rec.status!=='active')return fail('Code inconnu ou désactivé',401);
-   if(isLive(request)?!eligible(await recruitmentCandidate(rec.candidateId)):!String(rec.candidateId||'').startsWith('TEST-'))return fail('Code inconnu ou désactivé',401);
+   if(isLive(request,context)?!eligible(await recruitmentCandidate(rec.candidateId)):!String(rec.candidateId||'').startsWith('TEST-'))return fail('Code inconnu ou désactivé',401);
    return json({role:'participant',id,token:sign({role:'participant',id,exp:Date.now()+8*60*60*1000},secret)});
   }
   const raw=String(request.headers.get('authorization')||''),token=raw.replace(/^Bearer\s+/i,'');
   let auth=verify(token,secret);
   if(action==='rh-pass-preview'||action==='rh-pass-send'){
-   if(!isLive(request)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
+   if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
    if(!validCandidateId(body.candidateId))return fail('Dossier invalide');
    const row=await recruitmentCandidate(body.candidateId);
    if(!eligible(row))return fail('Candidat non validé par les RH',409);
-   if(action==='rh-pass-send'&&(!canSend(request)||body.confirm!==true))return fail('Envoi désactivé ou non confirmé',403);
+   if(action==='rh-pass-send'&&(!canSend(request,context)||body.confirm!==true))return fail('Envoi désactivé ou non confirmé',403);
    const id=await ensurePass(db,row,secret);if(!id)return fail('Pass indisponible',409);
    action=action==='rh-pass-send'?'invitation-send':'invitation-email';body={...body,id};auth={role:'rh'};
   }
@@ -208,7 +208,7 @@ export default async function handler(request){
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   return json({participants:await listParticipants(db),sendEnabled:canSend(request)});
+   return json({participants:await listParticipants(db),sendEnabled:canSend(request,context)});
   }
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
@@ -223,8 +223,8 @@ export default async function handler(request){
    if(!validId(body.id))return fail('Identifiant invalide');
    const rec=await db.get(participantKey(body.id),{type:'json'});
    if(!rec?.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation indisponible',404);
-   const staging=!isLive(request);
-   if(action==='invitation-send'&&(!canSend(request)||body.confirm!==true))return fail('Envoi réel désactivé ou non confirmé',403);
+   const staging=!isLive(request,context);
+   if(action==='invitation-send'&&(!canSend(request,context)||body.confirm!==true))return fail('Envoi réel désactivé ou non confirmé',403);
    let row;
    if(staging&&auth.role==='admin'&&rec.candidateId.startsWith('TEST-'))row={name:rec.alias,email:'test@example.invalid',status:'selected'};
    else {if(staging)return fail('Les emails de préproduction sont réservés aux profils TEST-',403);try{row=await recruitmentCandidate(rec.candidateId)}catch{return fail('Source recrutement indisponible',503)}}
@@ -256,7 +256,7 @@ export default async function handler(request){
      return json({mailStatus:'accepted',acceptedAt,recruitmentUpdated});
     }catch{await db.setJSON(mailKey,{state:'review_required',updatedAt:new Date().toISOString()});return fail('Résultat incertain : contrôler le fournisseur avant toute relance',502)}
    }
-   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
+   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request,context)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
   }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
@@ -270,7 +270,7 @@ export default async function handler(request){
   }
   if(action==='sync-recruitment'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   if(!isLive(request))return fail('Synchronisation réelle réservée à la production',403);
+   if(!isLive(request,context))return fail('Synchronisation réelle réservée à la production',403);
    let rows;try{rows=await recruitmentRows()}catch{return fail('Source recrutement indisponible',503)}
    let created=0,existing=0;
    for(const row of rows){
@@ -307,8 +307,8 @@ export default async function handler(request){
    const id=signedId||hash(code).slice(0,32),key=participantKey(id);
    for(let attempt=0;attempt<12;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status)||(!isLive(request)&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation inconnue ou révoquée',404);
-    if(isLive(request)&&!eligible(await recruitmentCandidate(rec.candidateId)))return fail('Candidat non validé par les RH',409);
+    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status)||(!isLive(request,context)&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation inconnue ou révoquée',404);
+    if(isLive(request,context)&&!eligible(await recruitmentCandidate(rec.candidateId)))return fail('Candidat non validé par les RH',409);
     if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
     const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
