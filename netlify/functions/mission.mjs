@@ -47,6 +47,19 @@ export default async function handler(request){
   const auth=verify(token,secret);
   if(!auth)return fail('Session absente ou expirée',401,'NOT_AUTHENTICATED');
   if(action==='me')return json({role:auth.role,id:auth.id||null});
+  if(action==='schedule'||action==='schedule-update'){
+   const defaults=[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
+   let stages=await db.get('event-schedule',{type:'json'})||defaults;
+   if(action==='schedule-update'){
+    if(auth.role!=='admin')return fail('Accès administrateur requis',403);
+    const index=stages.findIndex(x=>x.id===body.stage);
+    if(index<0||!Number.isSafeInteger(body.opensAt)||body.opensAt<0||body.opensAt>8640000000000000)return fail('Horaire invalide');
+    stages[index]={...stages[index],opensAt:body.opensAt};
+    await db.setJSON('event-schedule',stages);
+   }
+   const now=Date.now();
+   return json({now,stages:stages.map(x=>({...x,unlocked:now>=x.opensAt}))});
+  }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    return json({participants:await listParticipants(db)});
