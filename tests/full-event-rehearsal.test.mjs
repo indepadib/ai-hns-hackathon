@@ -34,7 +34,7 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   async function stage(stage,opensAt){assert.equal((await call({action:'schedule-update',stage,opensAt},ot)).status,200)}
   await stage('matching',0);await stage('challenge',Date.now()+3600000);await stage('problem',Date.now()+3600000);
   async function candidate(name){
-   const email=name.toLowerCase()+'@example.invalid',candidateId=createHash('sha256').update(email).digest('hex');
+   const email=name.toLowerCase().replace(/\s+/g,'-')+'@example.invalid',candidateId=createHash('sha256').update(email).digest('hex');
    await rh.setJSON(candidateId,{id:candidateId,name,email,status:'selected',history:[]});
    const pass=await call({action:'rh-pass-preview',candidateId},admin);assert.equal(pass.status,200,JSON.stringify(pass.data));
    const code=pass.data.code,id=createHash('sha256').update(code).digest('hex').slice(0,32);
