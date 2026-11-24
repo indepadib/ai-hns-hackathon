@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {invitationBlocker} from '../../lib/invitation-readiness.mjs';
 import {oauthConfig,beginOAuth,oauthAccess,oauthStatus,gmailSend,connectionKey,mailbox} from '../../lib/gmail-oauth.mjs';
 import {deliveryConfig,deliverInvitation} from '../../lib/invitation-delivery.mjs';
 import {eligible,validEmail,qrPayload,qrId,invitationEmail} from '../../lib/invitation-email.mjs';
@@ -279,7 +280,10 @@ export default async function handler(request,context){
      return json({mailStatus:'accepted',acceptedAt,recruitmentUpdated});
     }catch{await db.setJSON(mailKey,{state:'review_required',updatedAt:new Date().toISOString()});return fail('Résultat incertain : contrôler le fournisseur avant toute relance',502)}
    }
-   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
+   const provider=mailProvider();
+   const mailState=await db.get('invitation-mail-'+body.id,{type:'json'});
+   const sendBlocker=invitationBlocker({live:!staging,enabled:readEnv('HNS_INVITATION_SEND_ENABLED')==='true',provider:provider?.provider,connection:provider?.provider==='gmail-oauth'?await oauthStatus(db):null,row,pass:rec,mail:mailState});
+   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:!sendBlocker,sendBlocker,rhStatus:row.status,mailStatus:mailState?.state||'not_sent'});
   }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
