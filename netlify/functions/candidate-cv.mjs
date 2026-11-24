@@ -43,8 +43,8 @@ export default async function handler(request){
       if(!token)return err('CV non relié au dossier : ajoute HNS_NETLIFY_API_TOKEN dans les variables Netlify pour synchroniser les fichiers existants.',424);
       file=await findCVForEmail(record.email,token);
       if(file){ // Preserve notes, statuses, and concurrent edits.
-        const meta=await store.getMetadata(id);
-        if(meta?.etag)await store.setJSON(id,{...record,cvFile:file,hasCV:true},{onlyIfMatch:meta.etag});
+        const current=await store.getWithMetadata(id,{type:'json'});
+        if(current?.etag&&current.data&&!current.data.cvFile)await store.setJSON(id,{...current.data,cvFile:file,hasCV:true},{onlyIfMatch:current.etag});
       }
     }
     if(!file)return err('Aucun CV PDF trouvé dans Netlify Forms pour ce candidat',404);
