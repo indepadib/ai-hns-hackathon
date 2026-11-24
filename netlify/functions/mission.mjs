@@ -269,6 +269,9 @@ export default async function handler(request,context){
     const lock=await db.setJSON(mailKey,{state:'sending',startedAt:new Date().toISOString()},{onlyIfNew:true});
     if(!lock?.modified)return fail('Envoi déjà enregistré',409);
     try{
+     const latest=await recruitmentCandidate(rec.candidateId);
+     const latestPass=await db.get(participantKey(body.id),{type:'json'});
+     if(!latest||latest.status!=='selected'||latest.invitedAt||latest.email!==row.email||latestPass?.status!=='invited'||latestPass?.rsvp==='declined'){await db.setJSON(mailKey,{state:'review_required',reason:'eligibility_changed',updatedAt:new Date().toISOString()});return fail('Dossier modifié avant envoi : invitation bloquée',409)}
      const result=await deliverInvitation(config,{email,mail,qrCode,id:body.id},{db});
      const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,provider:result.provider,acceptedAt});
      let recruitmentUpdated=false;
