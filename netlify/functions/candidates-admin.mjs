@@ -47,6 +47,7 @@ export default async(request,context)=>{
   if(body.action==='set-status'){
    const status=body.status;if(!statusValues.includes(status)||['invited','confirmed'].includes(status))return response({error:'Les statuts Invité et Confirmé sont réservés au parcours invitation / participation. Utilisez Sélectionné pour valider un candidat.'},422);
    const result=await modify(store,body.id,r=>{
+    if(r.nonselection&&status!==r.status)throw Object.assign(Error('Une communication de non-sélection est enregistrée pour cette édition. Vérification RH requise avant reclassement.'),{rhProtected:true});
     if(r.invitedAt||['invited','confirmed'].includes(r.status))throw Object.assign(Error('Dossier déjà invité ou historique à corriger via le module dédié.'),{rhProtected:true});
     return {...r,status,updatedAt:new Date().toISOString(),history:[...(r.history||[]),timeEvent('status',{value:status})].slice(-80)};});
    if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
