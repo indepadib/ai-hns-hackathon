@@ -201,3 +201,16 @@ $('applyReset').onclick=async()=>{
  }catch(e){resetSnapshot=null;$('resetSummary').textContent=moved+' modification(s) confirmée(s) avant interruption. Actualisez l’analyse avant toute nouvelle opération.';try{await load()}catch{}}
  finally{setResetBusy(false)}
 };
+
+$('closeRestoreReport').onclick=()=>$('restoreReportDialog').close();
+$('restoreReport').onclick=async()=>{
+ const root=$('restoreReportBody');root.replaceChildren(el('p','','Lecture du rapport de production…'));$('restoreReportDialog').showModal();
+ try{
+  const {report}=await missionApi({action:'rh-restore-status'});
+  const labels={completed:'Restauration terminée',partial:'Restauration partielle — à contrôler',running:'Opération enregistrée comme en cours',review_required:'Rapport à contrôler',not_started:'Aucun rapport enregistré'};
+  root.replaceChildren(el('h3','',labels[report?.state]||'État non disponible'));
+  if(Number.isInteger(report?.restored)){for(const [label,value] of [['Dossiers retrouvés',report.matched],['Remis en sélectionné',report.restored],['Protégés',report.protected],['Conflits',report.conflicts],['Erreurs',report.errors]]){const row=el('div','restore-stat');row.append(el('span','',label),el('strong','',String(value??'—')));root.append(row)}}
+  if(report?.finishedAt)root.append(el('p','','Rapport du '+new Date(report.finishedAt).toLocaleString('fr-MA',{timeZone:'Africa/Casablanca'})));
+  root.append(el('p','','Lecture seule. Aucun statut ni email modifié.'));
+ }catch(e){root.replaceChildren(el('p','',e.message||'Rapport indisponible'))}
+};
