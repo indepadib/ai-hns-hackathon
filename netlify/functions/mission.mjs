@@ -1,4 +1,6 @@
 import QRCode from 'qrcode';
+import {oauthConfig,beginOAuth,oauthAccess,oauthStatus,gmailSend,connectionKey,mailbox} from '../../lib/gmail-oauth.mjs';
+import {deliveryConfig,deliverInvitation} from '../../lib/invitation-delivery.mjs';
 import {eligible,validEmail,qrPayload,qrId,invitationEmail} from '../../lib/invitation-email.mjs';
 import OpenAI from 'openai';
 import {getStore} from '@netlify/blobs';
@@ -29,8 +31,8 @@ const recruitmentStore=()=>getStore({name:'hns-ai-recruitment-2026',region:'eu-c
 const validCandidateId=id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id);
 const recruitmentCandidate=async id=>validCandidateId(id)?recruitmentStore().get(id,{type:'json'}):null;
 async function recruitmentRows(){const db=recruitmentStore(),{blobs}=await db.list();if(blobs.length>700)throw Error('Capacité recrutement dépassée');return (await Promise.all(blobs.map(x=>db.get(x.key,{type:'json'})))).filter(Boolean)}
-const mailProvider=()=>({apiKey:readEnv('HNS_RESEND_API_KEY')||readEnv('RESEND_API_KEY'),from:readEnv('HNS_INVITATION_FROM')||readEnv('HNS_EMAIL_FROM')});
-const canSend=(request,context)=>isLive(request,context)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&Object.values(mailProvider()).every(Boolean);
+const mailProvider=()=>deliveryConfig(readEnv);
+const canSend=(request,context)=>isLive(request,context)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&!!mailProvider();
 const isRecruitmentAdmin=request=>{const key=readEnv('HNS_ADMIN_TOKEN');return key.length>=32&&equal(hash(String(request.headers.get('authorization')||'')),hash('Bearer '+key))};
 async function ensurePass(db,row,secret){const candidateId=row.id;if(!validCandidateId(candidateId)||!eligible(row))return null;const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32),key=participantKey(id);await db.setJSON(key,{candidateId,alias:within(row.name,70),codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});return id}
 const scoresNames=['problem','design','build','test','demo'];
@@ -39,6 +41,7 @@ async function listParticipants(db){const out=[];let cursor;do{const page=await 
 const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
 export const config = { rateLimit: { action: 'rate_limit', windowLimit: 1800, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request,context){
+
  if(request.method==='GET'){const ready=readEnv('HNS_SESSION_SECRET').length>=32&&Object.values(env).every(name=>readEnv(name).length>=8);console.info('HNS_RUNTIME_HEALTH',JSON.stringify(Object.fromEntries(['HNS_SESSION_SECRET',...Object.values(env)].map(name=>[name,!readEnv(name)?'missing':readEnv(name).length<(name==='HNS_SESSION_SECRET'?32:8)?'too_short':'ready']))));return json({status:ready?'ok':'configuration_required',service:'hns-mission',version:'runtime-health-v2'},ready?200:503)}
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
  if(Number(request.headers.get('content-length')||0)>250000)return fail('Requête trop volumineuse',413);
@@ -60,6 +63,20 @@ export default async function handler(request,context){
  }
  try{
  const db=store();
+  if(['gmail-connect','gmail-status','gmail-test'].includes(action)){
+   if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
+   const cfg=oauthConfig(readEnv);if(!cfg)return fail('Configuration OAuth manquante',503);
+   if(action==='gmail-status')return json({...await oauthStatus(db),sendEnabled:readEnv('HNS_INVITATION_SEND_ENABLED')==='true'});
+   if(action==='gmail-connect')return json({url:await beginOAuth(db,cfg)});
+   if(body.confirm!==true)return fail('Confirmez le test interne',400);
+   const current=await db.getWithMetadata(connectionKey,{type:'json'});if(!current?.data?.refresh)return fail('Connectez Gmail',409);
+   if(current.data.testedAt)return json({testedAt:current.data.testedAt,alreadyTested:true});
+   if(current.data.testPending)return fail('Test déjà en cours ou à vérifier',409);
+   const lock=await db.setJSON(connectionKey,{...current.data,testPending:true},{onlyIfMatch:current.etag});if(!lock?.modified)return fail('Test déjà en cours ou à vérifier',409);
+   try{const access=await oauthAccess(db,cfg);const raw='From: '+mailbox+'\r\nTo: '+mailbox+'\r\nSubject: H&S - Test de connexion Gmail\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nTest interne uniquement. Aucun candidat contacte.';
+    await gmailSend(access,raw);const latest=await db.getWithMetadata(connectionKey,{type:'json'});if(latest?.data?.refresh!==current.data.refresh)return fail('Connexion modifiée pendant le test',409);const testedAt=new Date().toISOString();const write=await db.setJSON(connectionKey,{...latest.data,testPending:false,testedAt},{onlyIfMatch:latest.etag});if(!write?.modified)return fail('Test accepté; statut à vérifier',409);return json({testedAt});
+   }catch{return fail('Test non confirmé. Vérifiez la boîte Gmail avant de reconnecter.',502)}
+  }
   if(action==='invitation-rsvp'){
    const code=within(body.code,80).toUpperCase().replace(/[\s-]/g,'');
    if(!/^[A-F0-9]{24}$/.test(code)||!['confirmed','declined'].includes(body.response))return fail('Code ou réponse invalide',400);
@@ -244,23 +261,22 @@ export default async function handler(request,context){
    if(action==='invitation-send'){
     if(rec.status!=='invited'||rec.rsvp==='declined')return fail('Invitation non expédiable',409);
     if(row.invitedAt||row.status!=='selected')return fail('Une invitation RH a déjà été enregistrée ou le dossier n’est plus sélectionné. Vérifiez avant une relance.',409);
-    const {apiKey,from}=mailProvider();
-    if(!apiKey||!from||/[\r\n]/.test(from))return fail('Expéditeur non configuré',503);
+    const config=mailProvider();
+    if(!config)return fail('Expéditeur non configuré',503);
+    if(config.provider==='gmail-oauth'&&!(await oauthStatus(db)).testedAt)return fail('Test Gmail interne requis',409);
     const mailKey='invitation-mail-'+body.id,existing=await db.get(mailKey,{type:'json'});
     if(existing)return json({mailStatus:existing.state,acceptedAt:existing.acceptedAt||null,duplicatePrevented:true});
     const lock=await db.setJSON(mailKey,{state:'sending',startedAt:new Date().toISOString()},{onlyIfNew:true});
     if(!lock?.modified)return fail('Envoi déjà enregistré',409);
     try{
-     const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':'hns-invite-2026/'+body.id},body:JSON.stringify({from,to:[email],subject:mail.subject,html:mail.html,text:mail.text,attachments:[{filename:'pass.png',content:qrCode.split(',')[1],content_id:'hns-pass-qr',content_type:'image/png'}]}),redirect:'error',signal:AbortSignal.timeout(12000)});
-     const result=await response.json().catch(()=>null);
-     if(!response.ok||typeof result?.id!=='string'){await db.setJSON(mailKey,{state:'review_required',providerStatus:response.status,updatedAt:new Date().toISOString()});return fail('Envoi à contrôler dans le fournisseur avant toute relance',502)}
-     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,acceptedAt});
+     const result=await deliverInvitation(config,{email,mail,qrCode,id:body.id},{db});
+     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,provider:result.provider,acceptedAt});
      let recruitmentUpdated=false;
      try{const rh=recruitmentStore();for(let attempt=0;attempt<4;attempt++){const current=await rh.getWithMetadata(rec.candidateId,{type:'json'});if(!current?.data)break;if(current.data.invitedAt){recruitmentUpdated=true;break}if(current.data.status!=='selected')break;const next={...current.data,status:'invited',invitedAt:acceptedAt,updatedAt:acceptedAt,history:[...(current.data.history||[]),{at:acceptedAt,action:'invited',via:'mission-control'}].slice(-80)};const write=await rh.setJSON(rec.candidateId,next,{onlyIfMatch:current.etag});if(write.modified){recruitmentUpdated=true;break}}}catch{console.error('HNS_INVITE_RH_RECONCILIATION_REQUIRED')}
      return json({mailStatus:'accepted',acceptedAt,recruitmentUpdated});
     }catch{await db.setJSON(mailKey,{state:'review_required',updatedAt:new Date().toISOString()});return fail('Résultat incertain : contrôler le fournisseur avant toute relance',502)}
    }
-   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request,context)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
+   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging,sendEnabled:canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt)&&row.status==='selected'&&!row.invitedAt&&rec.status==='invited'&&rec.rsvp!=='declined'&&!(await db.get('invitation-mail-'+body.id,{type:'json'}))});
   }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);

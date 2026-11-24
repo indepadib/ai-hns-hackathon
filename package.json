@@ -11,7 +11,8 @@
   "dependencies": {
     "@netlify/blobs": "11.1.7",
     "qrcode": "^1.5.4",
-    "openai": "^6.0.0"
+    "openai": "^6.0.0",
+    "nodemailer": "^7.0.13"
   },
   "devDependencies": {
     "netlify-cli": "^23.0.0"

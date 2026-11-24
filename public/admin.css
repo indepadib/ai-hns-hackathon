@@ -24,3 +24,5 @@
 
 /* H&S linked invitation */
 .hns-pass-dialog{border:0;border-radius:18px;width:min(560px,94vw);max-height:90vh;padding:0;overflow:auto;color:#12365d;box-shadow:0 24px 70px #12365d55}.hns-pass-dialog::backdrop{background:#10284699}.hns-pass-hero{background:#12365d;color:#fff;padding:24px}.hns-pass-hero p{font-size:12px;letter-spacing:1px}.hns-pass-hero h2{font-size:28px;margin:12px 0 0}.hns-pass-body{padding:24px;background:#fff}.hns-pass-body img{display:block;max-width:100%;height:auto;margin:12px auto}.hns-pass-body strong{font-family:monospace;overflow-wrap:anywhere}.hns-pass-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:20px}.hns-pass-status a{color:#12365d;text-decoration:underline}
+
+.hns-gmail-panel{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 20px;padding:18px 22px;border:1px solid #d8e4ef;border-radius:16px;background:#f6f9fd;color:#17365d}.hns-gmail-panel p{margin:6px 0 0;font-size:13px}.hns-gmail-actions{display:flex;gap:8px;flex-wrap:wrap}.hns-gmail-actions button{min-height:42px}.hns-gmail-actions button:disabled{opacity:.45;cursor:not-allowed}
