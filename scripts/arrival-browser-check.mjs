@@ -74,7 +74,7 @@ try{
   assert.match(await page.locator('.flight-total strong').innerText(),/0\/6/);
   assert.equal(await page.locator('.welcome-next strong').innerText(),'challenge');
   await page.locator('#home-resume').click();
-  await page.locator('[data-challenge="availability"]').click();
+  await page.locator('[data-vertical="retail"]').click();await page.locator('[data-challenge="availability"]').click();
   await page.locator('#mission-home').click();
   assert.match(await page.locator('.flight-total strong').innerText(),/1\/6/);
   assert.equal(await page.locator('.welcome-next strong').innerText(),'problem');
@@ -86,6 +86,7 @@ try{
   const layout=await page.evaluate(()=>({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('main *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.getBoundingClientRect().width>0&&!e.closest('.lab-table,.starter-source,.explore-tables,.demo-track')).slice(0,12).map(e=>({tag:e.tagName,cls:String(e.className).slice(0,100),right:Math.round(e.getBoundingClientRect().right)}))}));console.log('Participant layout',JSON.stringify(layout));assert.ok(layout.scrollWidth<=layout.viewport+1,'Participant horizontal overflow: '+JSON.stringify(layout));
   assert.deepEqual(errors,[]);
   await page.screenshot({path:'browser-review/starter-'+viewport.width+'.png',fullPage:true});
+  await page.locator('#mission-home').click();await page.locator('.flight-grid [data-home-mission="challenge"]').click();await page.locator('[data-vertical="logistics"]').click();assert.equal(await page.locator('[data-challenge="availability"]').count(),0);assert.equal(await page.locator('[data-challenge]').count(),3);page.once('dialog',d=>d.accept());await page.locator('[data-challenge="delivery-risk"]').click();await page.locator('#mission-home').click();await page.locator('.flight-grid [data-home-mission="build"]').click();await page.locator('#starter-code').waitFor();assert.match(await page.locator('.data-hero').innerText(),/La Voie Express/i);assert.equal(await page.locator('[data-explore-table="shipments_train"]').count(),1);assert.equal(await page.locator('[data-explore-table="inventory_daily"]').count(),0);const sectorDownload=page.waitForEvent('download');await page.locator('#starter-input').click();assert.equal((await sectorDownload).suggestedFilename(),'hns-delivery-risk-evaluation-inputs.csv');assert.deepEqual(errors,[]);await page.screenshot({path:'browser-review/sector-'+viewport.width+'.png',fullPage:true});console.log('Sector challenge and isolated Data Lab verified:',viewport.width,'px');
   await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
  }
  for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
