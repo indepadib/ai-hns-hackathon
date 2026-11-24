@@ -1,0 +1,10 @@
+(function(root){
+'use strict';
+const missing=v=>v===null||v===undefined||v==='';
+function columns(rows){return Object.keys(rows[0]||{})}
+function profile(rows,key){let absent=0,valid=0,min=Infinity,max=-Infinity,sum=0,numeric=0;const distinct=new Set();for(const r of rows){const v=r[key];if(missing(v)){absent++;continue}valid++;distinct.add(v);if(typeof v==='number'&&Number.isFinite(v)){numeric++;min=Math.min(min,v);max=Math.max(max,v);sum+=v}}return{key,absent,valid,distinct:distinct.size,numeric:numeric>0&&numeric===valid,min:numeric?min:null,max:numeric?max:null,mean:numeric?sum/numeric:null}}
+function filter(rows,opt={}){const q=String(opt.query||'').trim().toLowerCase(),key=opt.column||'',mode=opt.mode||'all',value=String(opt.value??'').trim();return rows.filter(r=>{if(q&&!Object.values(r).some(v=>!missing(v)&&String(v).toLowerCase().includes(q)))return false;if(mode==='missing')return missing(r[key]);if(mode==='equal')return !missing(r[key])&&String(r[key])===value;if(mode==='gte'||mode==='lte'){if(missing(r[key])||value===''||typeof r[key]!=='number'||!Number.isFinite(Number(value)))return false;return mode==='gte'?r[key]>=Number(value):r[key]<=Number(value)}return true})}
+function sort(rows,key,descending=false){if(!key)return rows;return [...rows].sort((a,b)=>{const x=a[key],y=b[key];if(missing(x))return missing(y)?0:1;if(missing(y))return -1;const c=typeof x==='number'&&typeof y==='number'?x-y:String(x).localeCompare(String(y),'fr',{numeric:true});return descending?-c:c})}
+function aggregate(rows,group,metric,operation){const map=new Map();for(const r of rows){const label=missing(r[group])?'(manquant)':String(r[group]);if(!map.has(label))map.set(label,{label,count:0,valid:0,total:0});const a=map.get(label);a.count++;if(typeof r[metric]==='number'&&Number.isFinite(r[metric])){a.valid++;a.total+=r[metric]}}return [...map.values()].map(a=>({label:a.label,count:a.count,value:operation==='count'?a.count:operation==='mean'?(a.valid?a.total/a.valid:null):(a.valid?a.total:null)}))}
+root.HNSDataExplorer={columns,profile,filter,sort,aggregate};
+})(globalThis);
