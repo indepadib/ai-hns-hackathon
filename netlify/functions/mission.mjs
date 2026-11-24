@@ -173,7 +173,7 @@ export default async function handler(request,context){
   }
   if(['guest-list','guest-create','guest-update','guest-preview','guest-send','guest-revoke','guest-checkin','guest-rsvp-read','guest-rsvp'].includes(action)){
    if(!isLive(request,context))return fail('Espace invités réservé au site officiel',403);
-   const enabled=canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
+   const enabled=auth?.role==='admin'&&['guest-list','guest-send'].includes(action)&&canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
    const out=await guestAction({action,body,auth,db,secret,canSend:enabled,deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
    return json(out.value,out.status);
   }
