@@ -88,4 +88,66 @@ try{
   await page.screenshot({path:'browser-review/starter-'+viewport.width+'.png',fullPage:true});
   await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
  }
+ for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
+  const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[];
+  page.on('pageerror',err=>errors.push(err.message));
+  const rows=[{id:'a'.repeat(32),alias:'Projet fictif Alpha',submittedAt:'2026-11-28T16:00:00Z',score:null},{id:'b'.repeat(32),alias:'Projet fictif Beta',submittedAt:'2026-11-28T16:01:00Z',score:null}];
+  const workspace={challenge:{id:'availability'},problem:{summary:'Synthetic problem'},solution:{summary:'Synthetic solution'},submission:{result:'Synthetic demo'}};
+  await page.route('**/api/mission',async route=>{
+   const req=route.request();let out={},status=200;
+   if(req.method()==='GET')out={service:'hns-mission'};
+   else{const body=req.postDataJSON();switch(body.action){
+    case 'me':out={role:'jury'};break;
+    case 'jury-list':out={participants:rows};break;
+    case 'jury-dossier':out={...rows.find(x=>x.id===body.id),workspace};break;
+    case 'jury-score':{const row=rows.find(x=>x.id===body.id);assert.equal(body.expectedScoredAt,null);row.score={scores:body.scores,total:79.5,scoredAt:new Date().toISOString()};out={score:row.score};break}
+    default:status=400;out={error:'Unexpected jury request '+body.action};
+   }}
+   await route.fulfill({status,json:out});
+  });
+  await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-jury');sessionStorage.setItem('hns_mission_role','jury')});
+  await page.goto(base+'/mission-control/');
+  await page.locator('[data-dossier]').first().click();
+  await page.locator('#scoring').waitFor();
+  for(const [k,v] of Object.entries({problem:80,design:70,build:90,test:60,demo:100}))await page.locator('#score-'+k).fill(String(v));
+  assert.equal(await page.locator('#jury-total').innerText(),'79.5/100');
+  await page.locator('#scoring button[value="next"]').click();
+  await page.locator('.jury-dossier-heading h2').filter({hasText:'Projet fictif Beta'}).waitFor();
+  assert.equal(rows[0].score.total,79.5);assert.equal(rows[1].score,null);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Jury overflow');
+  assert.deepEqual(errors,[]);
+  await page.screenshot({path:'browser-review/jury-'+viewport.width+'.png',fullPage:true});
+  await context.close();console.log('Jury evaluation and next project verified:',viewport.width,'px');
+ }
+ for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
+  const context=await browser.newContext({viewport,acceptDownloads:true}),page=await context.newPage(),errors=[];
+  page.on('pageerror',err=>errors.push(err.message));
+  const id='a'.repeat(32),person={id,alias:'Participant fictif Alpha',count:1,dimensions:['data'],followup:'none'};
+  const project={id,alias:'Projet fictif Alpha',members:[{id,alias:person.alias}],challenge:'availability',submitted:true,score:{total:79.5},rank:1,documented:6,holdout:null};
+  await page.route('**/api/mission',async route=>{
+   const req=route.request();let out={},status=200;
+   if(req.method()==='GET')out={service:'hns-mission'};
+   else{const body=req.postDataJSON();switch(body.action){
+    case 'me':out={role:'admin'};break;
+    case 'staff-list':out={participants:[],sendEnabled:false};break;
+    case 'schedule':out={now:Date.now(),stages:[]};break;
+    case 'team-dashboard':out={teams:[]};break;
+    case 'final-results':out={generatedAt:new Date().toISOString(),projects:[project],people:[person],metrics:{projects:1,submitted:1,scored:1,pending:0,holdout:0,present:1,observed:1,followups:0},provisional:false};break;
+    default:status=400;out={error:'Unexpected admin request '+body.action};
+   }}
+   await route.fulfill({status,json:out});
+  });
+  await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
+  await page.goto(base+'/mission-control/');
+  await page.locator('#final-open').click();await page.locator('.final-project h3').waitFor();
+  assert.equal(await page.locator('.final-rank').innerText(),'#1');
+  await page.locator('[data-final-view="people"]').click();
+  assert.equal(await page.locator('.final-person h3').innerText(),person.alias);
+  assert.equal(await page.locator('.final-rank').count(),0);
+  page.once('dialog',dialog=>dialog.accept());const download=page.waitForEvent('download');await page.locator('#final-export').click();assert.equal((await download).suggestedFilename(),'hns-restitution-confidentielle.json');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Admin overflow');
+  assert.deepEqual(errors,[]);
+  await page.screenshot({path:'browser-review/final-'+viewport.width+'.png',fullPage:true});
+  await context.close();console.log('Final restitution and confidential export verified:',viewport.width,'px');
+ }
 }finally{await browser.close()}
