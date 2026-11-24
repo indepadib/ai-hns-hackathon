@@ -1,0 +1,39 @@
+name: Unified preview HTTP smoke
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.number == 7
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check immutable verified preview without credentials
+        env:
+          BASE: https://6b05b2206db5327c0ed8b913--hns-ai-challenge-staging.netlify.app
+        run: |
+          python3 - <<'PY'
+          import os,urllib.request,urllib.error,json
+          base=os.environ['BASE']
+          def request(path,body=None):
+              req=urllib.request.Request(base+path,data=json.dumps(body).encode() if body is not None else None,headers={'Content-Type':'application/json','User-Agent':'HNS-preview-smoke/1.0'})
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as r:return r.status,r.read(1000000),r.headers
+              except urllib.error.HTTPError as e:return e.code,e.read(100000),e.headers
+          for path,marker in [('/',b'hns-ai-candidates-2026'),('/admin-recrutement.html',b'admin.js'),('/mission-control/',b'/mission-control/app.js'),('/invitation-confirm/',b'/invitation-confirm/app.js')]:
+              status,data,headers=request(path)
+              assert status==200 and marker in data,(path,status)
+              print(path,status,'expected page')
+          for path in ['/.netlify/functions/candidates-admin','/.netlify/functions/candidate-cv?id='+'a'*64]:
+              status,_,_=request(path)
+              assert status in (401,403),(path,status)
+              print(path.split('?')[0],status,'protected')
+          status,data,headers=request('/api/mission')
+          assert status in (200,503) and json.loads(data).get('service')=='hns-mission',(status,data[:100])
+          print('Mission health:',status)
+          for action in ['staff-list','rh-pass-preview','recruitment-status']:
+              status,_,_=request('/api/mission',{'action':action,'candidateId':'a'*64,'candidateIds':['a'*64]})
+              assert status in (401,403,503),(action,status)
+              print(action,status,'protected')
+          PY
