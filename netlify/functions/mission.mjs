@@ -105,7 +105,9 @@ export default async function handler(request,context){
     return resetEligibility(row,pass,mail,{includeSelected});
    };
    if(action==='rh-reset-preview'){
-    const rows=(await recruitmentRows()).filter(r=>r.status==='confirmed'||includeSelected&&r.status==='selected');
+    if(body.ids!==undefined&&(!Array.isArray(body.ids)||body.ids.length>20||new Set(body.ids).size!==body.ids.length||body.ids.some(x=>!validCandidateId(x))))return fail('Lot de lecture invalide',400);
+    const source=body.ids===undefined?await recruitmentRows():await Promise.all(body.ids.map(id=>rh.get(id,{type:'json'})));
+    const rows=source.filter(r=>r&&(r.status==='confirmed'||includeSelected&&r.status==='selected'));
     const eligible=[],protectedRows=[];
     for(let i=0;i<rows.length;i+=20){const chunk=rows.slice(i,i+20);const flags=await Promise.all(chunk.map(inspect));chunk.forEach((r,j)=>(flags[j]?eligible:protectedRows).push({id:r.id,name:r.name,status:r.status}));}
     return json({eligible,protected:protectedRows});

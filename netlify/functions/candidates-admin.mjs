@@ -3,7 +3,7 @@ import {secureTokenEqual,env,openStoreOptions,ready,candidateId,clean,validateEm
 import {triage,dataFromSubmission,statusValues} from './triage.mjs';
 import {normalizeCV,candidateHasCV,safeCandidateSummary} from './_cv.mjs';
 const response=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
-const allowedActions=new Set(['set-status','note','invite','import']);
+const allowedActions=new Set(['set-status','note','invite','import','read-batch']);
 function auth(request){
  const bearer=(request.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
  return secureTokenEqual(env('HNS_ADMIN_TOKEN'),bearer);
@@ -25,11 +25,19 @@ export default async(request,context)=>{
   const store=getStore({...openStoreOptions(),consistency:'strong'});
   if(request.method==='GET'){
    const {blobs}=await store.list();if(blobs.length>700)return response({error:'Capacité de l’outil atteinte; contacter l’administrateur'},422);
-   const records=(await Promise.all(blobs.map(x=>store.get(x.key,{type:'json'})))).filter(Boolean).map(sanitize).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+   const keys=blobs.map(x=>x.key).filter(k=>/^[a-f0-9]{64}$/.test(k));
+   if(new URL(request.url).searchParams.get('index')==='1')return response({ids:keys,count:keys.length});
+   const rows=[];for(let i=0;i<keys.length;i+=20)rows.push(...await Promise.all(keys.slice(i,i+20).map(k=>store.get(k,{type:'json'}))));
+   const records=rows.filter(Boolean).map(sanitize).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
    return response({records,emailReady:ready(),formName:'hns-ai-candidates-2026',count:records.length});
   }
   const body=await request.json().catch(()=>null);
   if(!body || !allowedActions.has(body.action))return response({error:'Action invalide'},400);
+  if(body.action==='read-batch'){
+   const ids=body.ids;if(!Array.isArray(ids)||!ids.length||ids.length>25||new Set(ids).size!==ids.length||ids.some(k=>typeof k!=='string'||!/^[a-f0-9]{64}$/.test(k)))return response({error:'Lot de lecture invalide'},422);
+   const rows=await Promise.all(ids.map(k=>store.get(k,{type:'json'})));
+   return response({records:rows.filter(Boolean).map(sanitize),missing:ids.filter((_,i)=>!rows[i])});
+  }
   if(body.action==='import'){
    const entries=body.records;if(!Array.isArray(entries)||entries.length<1||entries.length>200)return response({error:'Import limité à 200 dossiers par lot'},422);
    let imported=0,skipped=0;
