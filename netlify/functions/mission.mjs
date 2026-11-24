@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {deliveryConfig,deliverInvitation} from '../../lib/invitation-delivery.mjs';
 import {eligible,validEmail,qrPayload,qrId,invitationEmail} from '../../lib/invitation-email.mjs';
 import OpenAI from 'openai';
 import {getStore} from '@netlify/blobs';
@@ -29,8 +30,8 @@ const recruitmentStore=()=>getStore({name:'hns-ai-recruitment-2026',region:'eu-c
 const validCandidateId=id=>typeof id==='string'&&/^[a-f0-9]{64}$/.test(id);
 const recruitmentCandidate=async id=>validCandidateId(id)?recruitmentStore().get(id,{type:'json'}):null;
 async function recruitmentRows(){const db=recruitmentStore(),{blobs}=await db.list();if(blobs.length>700)throw Error('Capacité recrutement dépassée');return (await Promise.all(blobs.map(x=>db.get(x.key,{type:'json'})))).filter(Boolean)}
-const mailProvider=()=>({apiKey:readEnv('HNS_RESEND_API_KEY')||readEnv('RESEND_API_KEY'),from:readEnv('HNS_INVITATION_FROM')||readEnv('HNS_EMAIL_FROM')});
-const canSend=(request,context)=>isLive(request,context)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&Object.values(mailProvider()).every(Boolean);
+const mailProvider=()=>deliveryConfig(readEnv);
+const canSend=(request,context)=>isLive(request,context)&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&!!mailProvider();
 const isRecruitmentAdmin=request=>{const key=readEnv('HNS_ADMIN_TOKEN');return key.length>=32&&equal(hash(String(request.headers.get('authorization')||'')),hash('Bearer '+key))};
 async function ensurePass(db,row,secret){const candidateId=row.id;if(!validCandidateId(candidateId)||!eligible(row))return null;const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32),key=participantKey(id);await db.setJSON(key,{candidateId,alias:within(row.name,70),codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});return id}
 const scoresNames=['problem','design','build','test','demo'];
@@ -244,17 +245,15 @@ export default async function handler(request,context){
    if(action==='invitation-send'){
     if(rec.status!=='invited'||rec.rsvp==='declined')return fail('Invitation non expédiable',409);
     if(row.invitedAt||row.status!=='selected')return fail('Une invitation RH a déjà été enregistrée ou le dossier n’est plus sélectionné. Vérifiez avant une relance.',409);
-    const {apiKey,from}=mailProvider();
-    if(!apiKey||!from||/[\r\n]/.test(from))return fail('Expéditeur non configuré',503);
+    const config=mailProvider();
+    if(!config)return fail('Expéditeur non configuré',503);
     const mailKey='invitation-mail-'+body.id,existing=await db.get(mailKey,{type:'json'});
     if(existing)return json({mailStatus:existing.state,acceptedAt:existing.acceptedAt||null,duplicatePrevented:true});
     const lock=await db.setJSON(mailKey,{state:'sending',startedAt:new Date().toISOString()},{onlyIfNew:true});
     if(!lock?.modified)return fail('Envoi déjà enregistré',409);
     try{
-     const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json','Idempotency-Key':'hns-invite-2026/'+body.id},body:JSON.stringify({from,to:[email],subject:mail.subject,html:mail.html,text:mail.text,attachments:[{filename:'pass.png',content:qrCode.split(',')[1],content_id:'hns-pass-qr',content_type:'image/png'}]}),redirect:'error',signal:AbortSignal.timeout(12000)});
-     const result=await response.json().catch(()=>null);
-     if(!response.ok||typeof result?.id!=='string'){await db.setJSON(mailKey,{state:'review_required',providerStatus:response.status,updatedAt:new Date().toISOString()});return fail('Envoi à contrôler dans le fournisseur avant toute relance',502)}
-     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,acceptedAt});
+     const result=await deliverInvitation(config,{email,mail,qrCode,id:body.id});
+     const acceptedAt=new Date().toISOString();await db.setJSON(mailKey,{state:'accepted',providerId:result.id,provider:result.provider,acceptedAt});
      let recruitmentUpdated=false;
      try{const rh=recruitmentStore();for(let attempt=0;attempt<4;attempt++){const current=await rh.getWithMetadata(rec.candidateId,{type:'json'});if(!current?.data)break;if(current.data.invitedAt){recruitmentUpdated=true;break}if(current.data.status!=='selected')break;const next={...current.data,status:'invited',invitedAt:acceptedAt,updatedAt:acceptedAt,history:[...(current.data.history||[]),{at:acceptedAt,action:'invited',via:'mission-control'}].slice(-80)};const write=await rh.setJSON(rec.candidateId,next,{onlyIfMatch:current.etag});if(write.modified){recruitmentUpdated=true;break}}}catch{console.error('HNS_INVITE_RH_RECONCILIATION_REQUIRED')}
      return json({mailStatus:'accepted',acceptedAt,recruitmentUpdated});
