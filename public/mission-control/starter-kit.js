@@ -8,8 +8,9 @@ const specs={
  inspection:{name:'Contrôle rayon',fields:['empty_facings'],rule:'return "review"',tip:'Utilisez les observations structurées et vérifiez les valeurs manquantes. Ce jeu ne mesure pas la vision par ordinateur.'}
 };
 function build(id){
- if(!Object.hasOwn(specs,id))throw Error('Challenge inconnu.');
- const s=specs[id],input='hns-'+id+'-evaluation-inputs.csv',output='hns-'+id+'-predictions.csv';
+ const topic=root.HNSVerticals?.get(id);
+ if(!Object.hasOwn(specs,id)&&!topic)throw Error('Challenge inconnu.');
+ const s=topic?{name:topic.title,fields:[topic.features[0][0]],rule:'return "yes" if float(row['+JSON.stringify(topic.features[0][0])+']) >= '+topic.features[0][3]+' else "no"',tip:'Comparez ce seuil à une méthode utilisant plusieurs variables ; entraînez uniquement sur les données historiques et testez sur les entrées ultérieures.'}:specs[id],input='hns-'+id+'-evaluation-inputs.csv',output='hns-'+id+'-predictions.csv';
  const script=[
  '# H&S AI Talent Challenge — référence de départ (non IA)',
  '# Données synthétiques. Ne pas utiliser pour des décisions réelles.',
