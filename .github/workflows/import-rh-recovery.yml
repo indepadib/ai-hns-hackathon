@@ -3,6 +3,9 @@ on:
   push:
     branches: [integration/unified-platform]
     paths: ['.github/workflows/import-rh-recovery.yml', 'recovery/**']
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
@@ -11,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   import:
-    if: github.ref == 'refs/heads/integration/unified-platform'
+    if: github.ref == 'refs/heads/integration/unified-platform' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'integration/unified-platform')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
