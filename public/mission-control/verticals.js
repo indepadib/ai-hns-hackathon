@@ -27,7 +27,7 @@ function get(id){return Object.hasOwn(byId,id)?byId[id]:null}
 function seeded(id){let state=2166136261;for(const c of 'HNS-20261128-v1-'+id)state=Math.imul(state^c.charCodeAt(0),16777619)>>>0;return()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
 function generate(id,random){const spec=get(id);if(!spec)throw Error('Sujet inconnu.');const rnd=random||seeded(id),train=[],evaluation=[],rows=[];for(let i=0;i<2400;i++){
  const split=i<1800?'train':'evaluation',group=spec.groups[Math.floor(rnd()*spec.groups.length)],sample={sample_id:id+'-'+String(i+1).padStart(4,'0'),observation_date:new Date(Date.UTC(2026,8,1)+Math.floor(i/30)*86400000).toISOString().slice(0,10),segment:group};
- const values=spec.features.map(([key,min,max])=>{const v=min+(max-min)*rnd();sample[key]=Math.round(v*10)/10;return(sample[key]-min)/(max-min)});
+ const values=spec.features.map(([key,min,max])=>{const v=min+(max-min)*rnd();sample[key]=/(?:count|codes|stops|fields|mismatches|references|approvals|dependencies|contacts|days)/.test(key)?Math.round(v):Math.round(v*10)/10;return(sample[key]-min)/(max-min)});
  const risk=values[0]*.43+values[1]*.34+values[2]*.23+(group===spec.groups[2]?.06:0);const target=risk+(rnd()-.5)*.42>.55?'yes':'no';const baseline=sample[spec.features[0][0]]>=spec.features[0][3]?'yes':'no';
  if(split==='train')train.push({...sample,target,split});else{evaluation.push({...sample,split});rows.push({sample,target,baseline})}
  }
