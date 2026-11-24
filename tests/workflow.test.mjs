@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import '../public/mission-control/workflow.js';const W=globalThis.HNSWorkflow;
+test('starter is an acyclic seven-block graph with human review branch',()=>{const g=W.starter();assert.equal(g.nodes.length,7);assert.equal(g.edges.length,7);assert.ok(W.inspect(g).checks[3].ok);assert.equal(W.inspect(g).checks[5].ok,false);assert.equal(W.layout(g).flat().length,7)});
+test('reject cycles and duplicate connections',()=>{const g=W.starter();assert.throws(()=>W.connect(g,'n7','n1'),/Boucle/);assert.throws(()=>W.connect(g,'n1','n2'),/déjà/);assert.throws(()=>W.connect(g,'n1','n99'),/invalide/)});
+test('remove node also removes its edges',()=>{const g=W.remove(W.starter(),'n4');assert.ok(g.edges.every(e=>e.from!=='n4'&&e.to!=='n4'));assert.equal(W.inspect(g).checks[2].ok,false)});
+test('disconnected output is not a reachable output',()=>{const g=W.add(W.add(W.empty(),'source'),'output');assert.equal(W.inspect(g).checks[2].ok,false);assert.equal(W.inspect(g).isolated,2)});
