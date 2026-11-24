@@ -40,7 +40,21 @@ const isRecruitmentAdmin=request=>{const key=readEnv('HNS_ADMIN_TOKEN');return k
 async function ensurePass(db,row,secret){const candidateId=row.id;if(!validCandidateId(candidateId)||!eligible(row))return null;const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32),key=participantKey(id);await db.setJSON(key,{candidateId,alias:within(row.name,70),codeHash:hash(code),status:'invited',version:0,workspace:{},submitted:false,checkedInAt:null},{onlyIfNew:true});return id}
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
-async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:(await db.get('invitation-mail-'+entry.key.slice(12),{type:'json'}))?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
+async function listParticipants(db){
+ const out=[];let cursor;
+ do{
+  const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});
+  for(let i=0;i<page.blobs.length;i+=15){
+   const batch=page.blobs.slice(i,i+15);
+   const rows=await Promise.all(batch.map(async entry=>{
+    const id=entry.key.slice(12),[rec,mail]=await Promise.all([db.get(entry.key,{type:'json'}),db.get('invitation-mail-'+id,{type:'json'})]);
+    if(!rec)return null;
+    return {id,alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:mail?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null};
+   }));out.push(...rows.filter(Boolean));
+  }cursor=page.cursor;
+ }while(cursor&&out.length<1000);
+ return out;
+}
 const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
 export const config = { rateLimit: { action: 'rate_limit', windowLimit: 1800, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request,context){
@@ -261,7 +275,7 @@ export default async function handler(request,context){
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   return json({participants:await listParticipants(db),sendEnabled:canSend(request,context)});
+   return json({participants:await listParticipants(db),sendEnabled:canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt)});
   }
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
@@ -368,6 +382,7 @@ export default async function handler(request,context){
     if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status)||(!isLive(request,context)&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation inconnue ou révoquée',404);
     if(isLive(request,context)&&!eligible(await recruitmentCandidate(rec.candidateId)))return fail('Candidat non validé par les RH',409);
     if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
+    if(rec.rsvp==='declined')return fail('Participation déclinée : vérifiez la situation avec les RH avant le contrôle d’accès',409,'RSVP_DECLINED');
     const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
     if(write?.modified)return json({id,alias:next.alias,checkedInAt:next.checkedInAt});
