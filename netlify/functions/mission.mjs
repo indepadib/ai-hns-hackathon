@@ -18,7 +18,7 @@ const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
 const defaultSchedule=()=>[['checkin','Accueil', '10:00'],['briefing','Briefing','10:30'],['matching','Matching','11:00'],['challenge','Choix du challenge','11:45'],['problem','Problem Canvas','12:15'],['solution','AI Solution Canvas','13:30'],['build','Build Sprint','14:15'],['redteam','Red Team','15:45'],['pitch','Pitch final','16:15'],['submission','Soumission et jury','17:15']].map(([id,label,time])=>({id,label,opensAt:Date.parse('2026-11-28T'+time+':00+01:00')}));
-export const config = { rateLimit: { action: 'rate_limit', windowLimit: 30, windowSize: 60, aggregateBy: ['ip'] } };
+export const config = { rateLimit: { action: 'rate_limit', windowLimit: 1800, windowSize: 60, aggregateBy: ['ip'] } };
 export default async function handler(request){
  if(request.method==='GET'){const ready=readEnv('HNS_SESSION_SECRET').length>=32&&Object.values(env).every(name=>readEnv(name).length>=8);console.info('HNS_RUNTIME_HEALTH',JSON.stringify(Object.fromEntries(['HNS_SESSION_SECRET',...Object.values(env)].map(name=>[name,!readEnv(name)?'missing':readEnv(name).length<(name==='HNS_SESSION_SECRET'?32:8)?'too_short':'ready']))));return json({status:ready?'ok':'configuration_required',service:'hns-mission',version:'runtime-health-v2'},ready?200:503)}
  if(request.method!=='POST')return fail('Méthode non autorisée',405);
@@ -186,7 +186,8 @@ export default async function handler(request){
   if(action==='submit'&&!isOpen('submission'))return fail('Soumission pas encore ouverte',403,'STAGE_LOCKED');
   if(action==='matching-list'){
    const people=await listParticipants(db);
-   return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!p.team).map(p=>({id:p.id,alias:p.alias})),choice:rec.matchChoice||null,team:rec.team||null});
+   const state=await db.get('matching-state-v2',{type:'json'})||{choices:{},teams:{}};
+   return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!state.teams[p.id]).map(p=>({id:p.id,alias:p.alias})),choice:state.choices[auth.id]||null,team:state.teams[auth.id]||null});
   }
   if(action==='matching-choice'){
    const target=body.target;
