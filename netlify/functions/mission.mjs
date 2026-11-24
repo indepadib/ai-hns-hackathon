@@ -184,24 +184,33 @@ export default async function handler(request){
    }
    return json({workspace:dossier.workspace||{},version:dossier.version||0,submitted:!!dossier.submitted,submittedAt:dossier.submittedAt||null,teamId});
   }
+  let dossierKey=key;
+  if(validId(rec.matchChoice)){
+   const id=hash([auth.id,rec.matchChoice].sort().join(':')).slice(0,32);
+   const team=await db.get('team-'+id,{type:'json'});
+   if(team?.members?.includes(auth.id))dossierKey='team-'+id;
+  }
+  const metadata=await db.getWithMetadata(dossierKey,{type:'json'});
+  if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
+  const dossier=metadata.data;
   if(action==='save'){
-   if(rec.submitted)return fail('Dossier déjà soumis',409);
-   if(!Number.isInteger(body.version)||body.version!==(rec.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
+   if(dossier.submitted)return fail('Dossier déjà soumis',409);
+   if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const w=body.workspace;if(!w||typeof w!=='object'||Array.isArray(w))return fail('Dossier invalide');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
    const clean={};for(const k of allowed)if(w[k]!==undefined)clean[k]=w[k];
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
-   rec.workspace=clean;rec.version=(rec.version||0)+1;rec.updatedAt=new Date().toISOString();
-   await db.setJSON(key,rec);
-   return json({version:rec.version,savedAt:rec.updatedAt});
+   dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();
+   const write=await db.setJSON(dossierKey,dossier,{onlyIfMatch:metadata.etag});if(!write?.modified)return fail('Modification concurrente : rechargez le dossier',409,'VERSION_CONFLICT');
+   return json({version:dossier.version,savedAt:dossier.updatedAt});
   }
   if(action==='submit'){
-   if(rec.submitted)return fail('Dossier déjà soumis',409);
-   if(!Number.isInteger(body.version)||body.version!==(rec.version||0))return fail('Version de dossier obsolète',409,'VERSION_CONFLICT');
-   const w=rec.workspace||{};
+   if(dossier.submitted)return fail('Dossier déjà soumis',409);
+   if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Version de dossier obsolète',409,'VERSION_CONFLICT');
+   const w=dossier.workspace||{};
    if(!String(w.problem?.summary||'').trim()||!String(w.solution?.summary||'').trim()||!String(w.submission?.result||'').trim())return fail('Problème, solution et résultat final obligatoires');
-   rec.submitted=true;rec.submittedAt=new Date().toISOString();await db.setJSON(key,rec);
-   return json({submittedAt:rec.submittedAt,receipt:'HNS-'+auth.id.slice(0,8).toUpperCase()});
+   dossier.submitted=true;dossier.submittedAt=new Date().toISOString();const write=await db.setJSON(dossierKey,dossier,{onlyIfMatch:metadata.etag});if(!write?.modified)return fail('Modification concurrente : rechargez le dossier',409,'VERSION_CONFLICT');
+   return json({submittedAt:dossier.submittedAt,receipt:'HNS-'+dossierKey.split('-').pop().slice(0,8).toUpperCase()});
   }
   return fail('Action inconnue',404);
  }catch(error){
