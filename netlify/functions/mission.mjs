@@ -149,16 +149,7 @@ export default async function handler(request){
    await db.setJSON(key,rec);
    return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt});
   }
-  if(action==='checkin'){
-   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   const alias=within(body.alias,70),team=within(body.team,50),teamSize=Number(body.teamSize||1);
-   if(!alias||alias.length>70)return fail('Référence participant obligatoire');
-   if(![1,2].includes(teamSize))return fail('Une équipe ne peut pas dépasser deux personnes');
-   const code=randomBytes(12).toString('hex').toUpperCase(),id=hash(code).slice(0,32);
-   const rec={codeHash:hash(code),alias,team,teamSize,status:'active',version:0,workspace:{},submitted:false,checkedInAt:new Date().toISOString()};
-   await db.setJSON(participantKey(id),rec);
-   return json({id,alias,code,checkedInAt:rec.checkedInAt});
-  }
+  if(action==='checkin')return fail('Scan QR obligatoire',403,'QR_REQUIRED');
   if(action==='revoke'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    if(!validId(body.id))return fail('Identifiant invalide');
@@ -199,12 +190,20 @@ export default async function handler(request){
   }
   if(action==='matching-choice'){
    if(rec.team||rec.submitted)return fail('Choix déjà verrouillé',409);
+   if(validId(rec.matchChoice)){
+    const existingTeam=await db.get('team-'+hash([auth.id,rec.matchChoice].sort().join(':')).slice(0,32),{type:'json'});
+    if(existingTeam?.members?.includes(auth.id))return fail('Binôme déjà constitué',409);
+   }
    if(!rec.checkedInAt)return fail('Présence requise',403);
    const target=body.target;
    if(target!=='solo'&&(!validId(target)||target===auth.id))return fail('Choix invalide');
    if(target!=='solo'){
     const peer=await db.get(participantKey(target),{type:'json'});
     if(!peer||peer.status!=='active'||!peer.checkedInAt||peer.team)return fail('Participant indisponible',409);
+    if(validId(peer.matchChoice)){
+     const existingTeam=await db.get('team-'+hash([target,peer.matchChoice].sort().join(':')).slice(0,32),{type:'json'});
+     if(existingTeam?.members?.includes(target))return fail('Participant déjà en binôme',409);
+    }
    }
    rec.matchChoice=target;
    await db.setJSON(key,rec);
