@@ -472,15 +472,18 @@ export default async function handler(request,context){
   if(action==='matching-list'){
    const people=await listParticipants(db);
    const state=await db.get('matching-state-v2',{type:'json'})||{choices:{},teams:{}};
-   return json({people:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!state.teams[p.id]).map(p=>({id:p.id,alias:p.alias})),choice:state.choices[auth.id]||null,team:state.teams[auth.id]||null});
+   const closed=isOpen('challenge')||isOpen('problem')||!!rec.submitted||(rec.version||0)>0;
+   return json({people:closed?[]:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!state.teams[p.id]).map(p=>({id:p.id,alias:p.alias})),choice:state.choices[auth.id]||null,team:state.teams[auth.id]||null,closed});
   }
   if(action==='matching-choice'){
+   // Once project work opens, preserve the established solo/team dossier.
+   if(isOpen('challenge')||isOpen('problem')||rec.submitted||(rec.version||0)>0)return fail('Matching clôturé : le dossier de travail est conservé.',409,'MATCHING_CLOSED');
    const target=body.target;
    if(target!=='solo'&&(!validId(target)||target===auth.id))return fail('Choix invalide');
    if(!rec.checkedInAt||rec.status!=='active')return fail('Présence requise',403);
    if(target!=='solo'){
     const peer=await db.get(participantKey(target),{type:'json'});
-    if(!peer||peer.status!=='active'||!peer.checkedInAt)return fail('Participant indisponible',409);
+    if(!peer||peer.status!=='active'||!peer.checkedInAt||peer.submitted||(peer.version||0)>0)return fail('Participant indisponible ou dossier de travail déjà commencé',409);
    }
    for(let attempt=0;attempt<80;attempt++){
     const meta=await db.getWithMetadata('matching-state-v2',{type:'json'});
@@ -493,6 +496,7 @@ export default async function handler(request,context){
      teamId=hash([auth.id,target].sort().join(':')).slice(0,32);
      teams[auth.id]=teamId;teams[target]=teamId;
     }
+    if(isOpen('challenge')||isOpen('problem'))return fail('Matching clôturé : le dossier de travail est conservé.',409,'MATCHING_CLOSED');
     const write=await db.setJSON('matching-state-v2',{choices,teams},meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
     if(!write?.modified)continue;
     return json({choice:target,mutual:!!teamId,teamId});

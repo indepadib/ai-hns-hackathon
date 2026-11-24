@@ -10,7 +10,7 @@ function plan({workspace={},stages=[],match={},submitted=false,now=Date.now(),es
  const rules=rulesFor(workspace,estimateImpact),open=id=>stages.some(s=>s.id===id&&now>=s.opensAt);
  const steps=order.map(id=>{const [title,criteria]=rules[id],done=criteria.filter(c=>c[1]).length;return{id,title,done,total:criteria.length,missing:criteria.filter(c=>!c[1]).map(c=>c[0]),open:open(id)}});
  const documented=steps.filter(s=>s.done===s.total).length;
- const recommended=submitted?'submission':open('matching')&&!match.choice&&!match.team?'matching':steps.find(s=>s.open&&s.done<s.total)?.id||(open('submission')?'submission':stages.filter(s=>now>=s.opensAt).at(-1)?.id||null);
+ const recommended=submitted?'submission':open('matching')&&!match.closed&&!open('challenge')&&!open('problem')&&!match.choice&&!match.team?'matching':steps.find(s=>s.open&&s.done<s.total)?.id||(open('submission')?'submission':stages.filter(s=>now>=s.opensAt).at(-1)?.id||null);
  return {steps,documented,total:steps.length,recommended,current:stages.filter(s=>now>=s.opensAt).at(-1)?.id||null};
 }
 root.HNSJourney=Object.freeze({rulesFor,plan});
