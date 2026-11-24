@@ -4,7 +4,7 @@ import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
 import {teamSignals} from '../../lib/team-signals.mjs';
-import {privateTables,privateDataset,inputPayload,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
+import {privateTables,privateDataset,inputPayload,inputDigest,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
 let privateCache=null;
 import '../../public/mission-control/retail-data.js';
 import '../../public/mission-control/benchmark.js';
@@ -218,7 +218,7 @@ export default async function handler(request){
    const existing=await db.get(resultKey,{type:'json'});
    if(action==='jury-holdout-status')return json({report:existing?.report||null,challenge,protocol:privateProtocol});
    if(action==='jury-holdout-score'&&existing)return fail('Un résultat officiel existe déjà pour ce dossier.',409,'HOLDOUT_LOCKED');
-   if(action==='jury-holdout-score'&&(!Array.isArray(body.predictions)||body.predictions.length>10000))return fail('Prédictions invalides');
+   if(action==='jury-holdout-score'&&(!Array.isArray(body.values)||body.values.length>10000||typeof body.inputDigest!=='string'))return fail('Prédictions invalides');
    let config=await db.get('jury-holdout-seed-v1',{type:'json'});
    if(!config){await db.setJSON('jury-holdout-seed-v1',{seed:randomBytes(32).toString('hex')},{onlyIfNew:true});config=await db.get('jury-holdout-seed-v1',{type:'json'})}
    if(!config?.seed)return fail('Jeu confidentiel indisponible',503);
@@ -226,7 +226,8 @@ export default async function handler(request){
     if(privateCache?.seed!==config.seed)privateCache={seed:config.seed,tables:privateTables(config.seed)};
     const d=privateDataset(challenge,privateCache.tables,config.seed);
     if(action==='jury-holdout-inputs')return json(inputPayload(d));
-    const report={...evaluatePrivate(d,body.predictions),computedAt:new Date().toISOString(),private:true};
+    if(body.inputDigest!==inputDigest(d)||body.values.length!==d.rows.length)return fail('Jeu d’évaluation différent ou incomplet. Réexportez les entrées.',409,'HOLDOUT_INPUT_MISMATCH');
+    const report={...evaluatePrivate(d,d.rows.map((r,i)=>({sample_id:r.sample.sample_id,prediction:body.values[i]}))),computedAt:new Date().toISOString(),private:true};
     const write=await db.setJSON(resultKey,{report},{onlyIfNew:true});
     if(!write?.modified)return fail('Un résultat officiel existe déjà pour ce dossier.',409,'HOLDOUT_LOCKED');
     return json({report});
