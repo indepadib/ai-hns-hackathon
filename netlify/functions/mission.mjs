@@ -61,6 +61,26 @@ export default async function handler(request){
    const now=Date.now();
    return json({now,stages:stages.map(x=>({...x,unlocked:now>=x.opensAt}))});
   }
+  if(action==='team-dashboard'){
+   if(!['admin','jury'].includes(auth.role))return fail('Accès interdit',403);
+   const people=await listParticipants(db),teams=[],assigned=new Set();
+   let cursor;
+   do{
+    const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});
+    for(const entry of page.blobs){
+     const t=await db.get(entry.key,{type:'json'});
+     if(!t||!Array.isArray(t.members))continue;
+     t.members.forEach(id=>assigned.add(id));
+     teams.push({id:entry.key.slice(5),alias:t.alias,members:t.members.map(id=>people.find(p=>p.id===id)?.alias||id),submitted:!!t.submitted,submittedAt:t.submittedAt||null,score:t.score||null,progress:Object.keys(t.workspace||{}).filter(k=>JSON.stringify(t.workspace[k]).length>10).length});
+    }
+    cursor=page.cursor;
+   }while(cursor);
+   for(const p of people.filter(p=>p.status==='active'&&!assigned.has(p.id))){
+    const rec=await db.get(participantKey(p.id),{type:'json'});
+    teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:Object.keys(rec?.workspace||{}).filter(k=>JSON.stringify(rec.workspace[k]).length>10).length});
+   }
+   return json({teams:teams.filter(t=>auth.role==='admin'||t.submitted).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
+  }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    return json({participants:await listParticipants(db)});
