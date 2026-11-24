@@ -47,6 +47,10 @@ export default async function handler(request,context){
  let body;
  try{body=await request.json();if(!body||typeof body!=='object'||Array.isArray(body))throw Error('invalid');if(JSON.stringify(body).length>200000)return fail('Requête trop volumineuse',413)}catch{return fail('Corps JSON invalide',400)}
  let action=body.action;
+ if(action==='rh-session'){
+  if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
+  return json({role:'rh',token:sign({role:'rh',exp:Date.now()+4*60*60*1000},secret)});
+ }
  const loginRoles={'admin-login':'admin','rh-login':'rh','jury-login':'jury'};
  if(Object.hasOwn(loginRoles,action)){
   const role=loginRoles[action],key=readEnv(env[role]);
