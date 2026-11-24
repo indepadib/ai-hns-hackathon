@@ -1,30 +1,24 @@
 # H&S AI Talent Challenge — 2026
 
-Dépôt de développement du programme H&S AI Talent Challenge du 28 novembre 2026.
+Plateforme unifiée : recrutement, CV, invitations, confirmation, accueil, Mission Control et jury.
 
-> **Statut : reconstruction contrôlée.** Le site officiel `ai.hns.ma` a été publié précédemment hors de GitHub ; ses sources complètes ne sont pas encore intégrées ici. Ne pas connecter ce dépôt à la production avant migration et recette des candidatures.
+## Routes
+- `/` — site public et candidature
+- `/admin-recrutement.html` — Talent Center RH
+- `/invitation-confirm/` — confirmation candidat
+- `/mission-control/` — hackathon et espaces de travail
 
-## Périmètre
-
-- **Site public / candidatures** : conservation du site existant, récupération des sources à effectuer.
-- **Mission Control** : portail opérationnel du hackathon, sous `/mission-control/`.
-- **Backend** : fonctions Netlify, Netlify Blobs pour les espaces de travail.
-- **Rôles** : administrateur, RH, jury, participant, autorisations vérifiées côté serveur.
-- **Tests** : suite Node.js et future recette E2E sur staging.
-
-## Démarrage local
-
+## Développement
 ```sh
 npm install
+npm run verify
 npx netlify dev
 ```
 
-La page Mission Control est disponible à `/mission-control/`. Voir `.env.example` pour les variables nécessaires. **Aucun secret ni aucune donnée réelle de candidature ne doit être commité.**
+Les tests utilisent uniquement des candidats fictifs, des stores simulés et un fournisseur de mail mocké. La préproduction est un projet Netlify distinct.
 
-## État de livraison
+## Production : conserver le projet existant
+Site Netlify `ai-hns-hackathon` (33dae2ce-086d-4470-b6fe-248f3ca49b70), domaine `ai.hns.ma`.
+Ne pas transférer le domaine à la préproduction, recréer le site, réimporter le CSV ou renommer le store. Le recrutement conserve le store `hns-ai-recruitment-2026` (eu-central-1) et le formulaire `hns-ai-candidates-2026`. Les CV restent liés au formulaire historique. Mission Control utilise son store distinct `hns-ai-mission-control` sur le même projet.
 
-Le code présent ici est une **base de développement**, non une livraison validée en production. Les accès, la persistance Netlify et les parcours doivent être testés sur un déploiement Netlify avant activation.
-
-## Déploiement
-
-Déployer initialement en préproduction uniquement. Ne jamais remplacer directement `ai.hns.ma` avec ce dépôt tant que sa landing page, son formulaire et les candidatures n'ont pas été migrés et vérifiés. Voir `docs/RELEASE_CHECKLIST.md`.
+Le code est restauré et testé en CI ; la validation réelle sur production reste une étape distincte. Voir [procédure de publication](docs/UNIFIED_RELEASE.md) et [.env.example](.env.example). Aucun secret, dossier candidat, CV ou export CSV ne doit entrer dans GitHub.

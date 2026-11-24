@@ -1,0 +1,5 @@
+import {test} from 'node:test';import {strict as assert} from 'node:assert';import {candidateId,validateEmail,escapeHTML,receiptTemplate,invitationTemplate,secureTokenEqual} from '../netlify/functions/_utils.mjs';
+test('Candidate hashing stable and does not leak email',()=>{const a=candidateId(' EMAIL@EXAMPLE.COM ');assert.equal(a,candidateId('email@example.com'));assert.equal(a.length,64);assert.ok(!a.includes('email'));});
+test('HTML escaping protects email templates',()=>{assert.equal(escapeHTML('<script>&"'), '&lt;script&gt;&amp;&quot;');assert.ok(receiptTemplate('Amine').html.includes('candidature'));assert.ok(invitationTemplate('Amine').subject.includes('Invitation officielle'));});
+test('Token compare rejects weak and invalid tokens',()=>{assert.equal(secureTokenEqual('short','short'),false);assert.equal(secureTokenEqual('a'.repeat(40),'a'.repeat(40)),true);assert.equal(secureTokenEqual('a'.repeat(40),'b'.repeat(40)),false);});
+test('Validate email',()=>{assert.ok(validateEmail('a@hns.ma'));assert.ok(!validateEmail('not-an-email'));});
