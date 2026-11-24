@@ -16,6 +16,7 @@ import {validateObservation,validateFollowup,summarize as summarizeTalent} from 
 import {privateTables,privateDataset,inputPayload,inputDigest,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
 let privateCache=null;
 import '../../public/mission-control/retail-data.js';
+import '../../public/mission-control/verticals.js';
 import '../../public/mission-control/benchmark.js';
 const benchmarkSignature=(report,key,secret)=>createHmac('sha256',secret).update('benchmark-v1|'+key+'|'+JSON.stringify(report)).digest('hex');
 let cachedRetail=null;
@@ -528,7 +529,7 @@ export default async function handler(request,context){
    if((body.teamId||null)!==(matchedId||null))return fail('Votre équipe a changé. Rechargez le dossier.',409,'TEAM_CHANGED');
    if(!Object.hasOwn(globalThis.HNSBenchmark.descriptions,body.challenge)||!Array.isArray(body.values)||body.values.length>10000)return fail('Prédictions invalides');
    if(dossier.workspace?.challenge?.id!==body.challenge)return fail('Enregistrez d’abord le challenge sélectionné.',409,'BENCHMARK_CHALLENGE');
-   try{cachedRetail||=globalThis.HNSRetailData.generate();const data=globalThis.HNSBenchmark.dataset(body.challenge,cachedRetail);const result=globalThis.HNSBenchmark.report(data,body.values);const report={...result,computedAt:new Date().toISOString(),predictionHash:hash(JSON.stringify(body.values))};return json({report,signature:benchmarkSignature(report,dossierKey,secret)})}catch(err){return fail(err.message||'Évaluation impossible')}
+   try{const sector=globalThis.HNSVerticals.get(body.challenge);if(!sector)cachedRetail||=globalThis.HNSRetailData.generate();const data=globalThis.HNSBenchmark.dataset(body.challenge,sector?null:cachedRetail);const result=globalThis.HNSBenchmark.report(data,body.values);const report={...result,computedAt:new Date().toISOString(),predictionHash:hash(JSON.stringify(body.values))};return json({report,signature:benchmarkSignature(report,dossierKey,secret)})}catch(err){return fail(err.message||'Évaluation impossible')}
   }
   if(action==='save'){
    if(!isOpen('challenge')&&!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
@@ -544,6 +545,7 @@ export default async function handler(request,context){
    if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
    const stageFor={problem:'problem',solution:'solution',tasks:'build',tests:'build',decisions:'build',redteam:'redteam',audit:'redteam',submission:'pitch',challenge:'challenge'};const clean={...dossier.workspace};for(const k of allowed)if(w[k]!==undefined&&isOpen(stageFor[k]))clean[k]=w[k];
+   if(clean.challenge){const id=clean.challenge.id,vertical=globalThis.HNSVerticals.verticalFor(id);if(!vertical)return fail('Sujet de challenge invalide',400,'CHALLENGE_INVALID');if(clean.challenge.vertical&&clean.challenge.vertical!==vertical)return fail('Sujet incompatible avec la verticale',400,'CHALLENGE_INVALID');clean.challenge={...clean.challenge,id,vertical};}
    if(clean.tests?.benchmark){const b=clean.tests.benchmark;if(!b.report||b.report.challenge!==clean.challenge?.id){delete clean.tests.benchmark}else if(typeof b.signature!=='string'||!equal(b.signature,benchmarkSignature(b.report,dossierKey,secret)))return fail('Rapport de benchmark non authentifié. Relancez l’évaluation.',400,'BENCHMARK_INVALID');}
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
    dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();dossier.lastSave=requestId?{id:requestId,actor:auth.id,baseVersion:body.version,fingerprint}:null;
