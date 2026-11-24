@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {eligible,validEmail,qrPayload,qrId,invitationEmail} from '../../lib/invitation-email.mjs';
 import OpenAI from 'openai';
 import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
@@ -23,6 +24,7 @@ const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
 const readEnv=name=>{const native=globalThis.Netlify?.env?.get(name);return (native||process.env[name]||'').trim()};
 const env={admin:'HNS_ADMIN_KEY',rh:'HNS_RH_KEY',jury:'HNS_JURY_KEY'};
+async function recruitmentRows(){const key=readEnv('HNS_RECRUITMENT_KEY');if(!key)throw Error('Connexion recrutement non configurée');const response=await fetch('https://ai.hns.ma/.netlify/functions/candidates-admin',{headers:{Authorization:'Bearer '+key},redirect:'error',signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('Source recrutement indisponible');const payload=await response.json();const rows=Array.isArray(payload)?payload:payload.records||payload.candidates||payload.items;if(!Array.isArray(rows))throw Error('Format recrutement inconnu');return rows}
 const scoresNames=['problem','design','build','test','demo'];
 function store(){return getStore({name:'hns-ai-mission-control',consistency:'strong'})}
 async function listParticipants(db){const out=[];let cursor;do{const page=await db.list({prefix:'participant-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const rec=await db.get(entry.key,{type:'json'});if(rec)out.push({id:entry.key.slice(12),alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,submittedAt:rec.submittedAt||null,score:rec.score||null})}cursor=page.cursor}while(cursor&&out.length<1000);return out}
@@ -171,6 +173,26 @@ export default async function handler(request){
    do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const t=await db.get(entry.key,{type:'json'});if(!t)continue;(t.members||[]).forEach(id=>assigned.add(id));if(t.submitted)participants.push({id:entry.key.slice(5),alias:t.alias,team:(t.members||[]).map(id=>people.find(p=>p.id===id)?.alias||id).join(' / '),submittedAt:t.submittedAt,score:t.score||null})}cursor=page.cursor}while(cursor);
    return json({participants:participants.filter(p=>!assigned.has(p.id)).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
+  if(action==='invitation-email'){
+   if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
+   if(!validId(body.id))return fail('Identifiant invalide');
+   const rec=await db.get(participantKey(body.id),{type:'json'});
+   if(!rec?.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation indisponible',404);
+   const staging=new URL(request.url).hostname!=='ai.hns.ma';
+   let row;
+   if(staging&&auth.role==='admin'&&rec.candidateId.startsWith('TEST-'))row={name:rec.alias,email:'test@example.invalid',status:'selected'};
+   else {if(staging)return fail('Les emails de préproduction sont réservés aux profils TEST-',403);try{row=(await recruitmentRows()).find(x=>String(x.id)===rec.candidateId)}catch{return fail('Source recrutement indisponible',503)}}
+   if(!eligible(row))return fail('Candidat non validé par les RH',409);
+   const email=within(row.email,254);
+   if(!validEmail(email))return fail('Email candidat absent ou invalide',422);
+   const code=createHmac('sha256',secret).update('invitation-v1:'+rec.candidateId).digest('hex').slice(0,24).toUpperCase();
+   if(!equal(rec.codeHash,hash(code))||hash(code).slice(0,32)!==body.id)return fail('Invitation incohérente',409);
+   const qrCode=await QRCode.toDataURL(qrPayload(body.id,secret),{errorCorrectionLevel:'M',margin:4,width:320});
+   const participantUrl=staging?'https://hns-ai-challenge-staging.netlify.app/mission-control/':'https://ai.hns.ma/mission-control/';
+   const reference='HNS-'+body.id.slice(0,8).toUpperCase(),name=within(row.name||rec.alias,150);
+   const mail=invitationEmail({name,email,code,qrCode,participantUrl,reference,preview:staging});
+   return json({name,email,code,qrCode,reference,participantUrl,subject:mail.subject,text:mail.text,eml:mail.eml,preview:staging});
+  }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const candidateId=within(body.candidateId,160);
@@ -218,11 +240,12 @@ export default async function handler(request){
   if(action==='scan-invitation'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const code=within(body.code,80).toUpperCase();
-   if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide');
-   const id=hash(code).slice(0,32),key=participantKey(id);
+   const signedId=qrId(code,secret),legacy=/^[A-F0-9]{24}$/.test(code);
+   if(!signedId&&!legacy)return fail('QR invalide');
+   const id=signedId||hash(code).slice(0,32),key=participantKey(id);
    for(let attempt=0;attempt<12;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec||!equal(rec.codeHash,hash(code))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
+    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
     if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
     const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
