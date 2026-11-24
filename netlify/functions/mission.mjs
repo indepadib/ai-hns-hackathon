@@ -142,12 +142,15 @@ export default async function handler(request){
    const code=within(body.code,80).toUpperCase();
    if(!/^[A-F0-9]{24}$/.test(code))return fail('Code invalide');
    const id=hash(code).slice(0,32),key=participantKey(id);
-   const rec=await db.get(key,{type:'json'});
-   if(!rec||!equal(rec.codeHash,hash(code))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
-   if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
-   rec.status='active';rec.checkedInAt=new Date().toISOString();
-   await db.setJSON(key,rec);
-   return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt});
+   for(let attempt=0;attempt<12;attempt++){
+    const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
+    if(!rec||!equal(rec.codeHash,hash(code))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
+    if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
+    const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
+    const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
+    if(write?.modified)return json({id,alias:next.alias,checkedInAt:next.checkedInAt});
+   }
+   return fail('Scan concurrent : réessayez',409);
   }
   if(action==='checkin')return fail('Scan QR obligatoire',403,'QR_REQUIRED');
   if(action==='revoke'){
