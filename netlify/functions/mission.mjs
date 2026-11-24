@@ -4,6 +4,8 @@ import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
 import {teamSignals} from '../../lib/team-signals.mjs';
+import {privateTables,privateDataset,inputPayload,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
+let privateCache=null;
 import '../../public/mission-control/retail-data.js';
 import '../../public/mission-control/benchmark.js';
 const benchmarkSignature=(report,key,secret)=>createHmac('sha256',secret).update('benchmark-v1|'+key+'|'+JSON.stringify(report)).digest('hex');
@@ -205,12 +207,37 @@ export default async function handler(request){
    if(!rec)return fail('Participant inconnu',404);
    rec.status='revoked';rec.revokedAt=new Date().toISOString();await db.setJSON(key,rec);return json({revoked:true});
   }
+  if(['jury-holdout-inputs','jury-holdout-score','jury-holdout-status'].includes(action)){
+   if(auth.role!=='jury')return fail('Accès jury requis',403);
+   if(!validId(body.id))return fail('Identifiant invalide');
+   const team=await db.get('team-'+body.id,{type:'json'}),rec=team||await db.get(participantKey(body.id),{type:'json'});
+   if(!rec?.submitted)return fail('Dossier non soumis',409);
+   const challenge=rec.workspace?.challenge?.id;
+   if(!Object.hasOwn(globalThis.HNSBenchmark.descriptions,challenge))return fail('Challenge non renseigné');
+   const resultKey='jury-holdout-v1-'+(team?'team-':'solo-')+body.id;
+   const existing=await db.get(resultKey,{type:'json'});
+   if(action==='jury-holdout-status')return json({report:existing?.report||null,challenge,protocol:privateProtocol});
+   if(action==='jury-holdout-score'&&existing)return fail('Un résultat officiel existe déjà pour ce dossier.',409,'HOLDOUT_LOCKED');
+   if(action==='jury-holdout-score'&&(!Array.isArray(body.predictions)||body.predictions.length>10000))return fail('Prédictions invalides');
+   let config=await db.get('jury-holdout-seed-v1',{type:'json'});
+   if(!config){await db.setJSON('jury-holdout-seed-v1',{seed:randomBytes(32).toString('hex')},{onlyIfNew:true});config=await db.get('jury-holdout-seed-v1',{type:'json'})}
+   if(!config?.seed)return fail('Jeu confidentiel indisponible',503);
+   try{
+    if(privateCache?.seed!==config.seed)privateCache={seed:config.seed,tables:privateTables(config.seed)};
+    const d=privateDataset(challenge,privateCache.tables,config.seed);
+    if(action==='jury-holdout-inputs')return json(inputPayload(d));
+    const report={...evaluatePrivate(d,body.predictions),computedAt:new Date().toISOString(),private:true};
+    const write=await db.setJSON(resultKey,{report},{onlyIfNew:true});
+    if(!write?.modified)return fail('Un résultat officiel existe déjà pour ce dossier.',409,'HOLDOUT_LOCKED');
+    return json({report});
+   }catch(err){return fail(err.message||'Évaluation impossible')}
+  }
   if(action==='jury-dossier'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
    if(!validId(body.id))return fail('Identifiant invalide');
    const rec=await db.get('team-'+body.id,{type:'json'})||await db.get(participantKey(body.id),{type:'json'});
    if(!rec||!rec.submitted)return fail('Dossier non soumis',404);
-   return json({id:body.id,alias:rec.alias,team:rec.team,workspace:rec.workspace||{},submittedAt:rec.submittedAt,score:rec.score||null});
+   const holdout=await db.get('jury-holdout-v1-'+(rec.members?'team-':'solo-')+body.id,{type:'json'});return json({id:body.id,alias:rec.alias,team:rec.team,workspace:rec.workspace||{},submittedAt:rec.submittedAt,score:rec.score||null,holdout:holdout?.report||null});
   }
   if(action==='jury-score'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);

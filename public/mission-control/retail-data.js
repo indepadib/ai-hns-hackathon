@@ -1,8 +1,8 @@
 /* All records are synthetic and reproducible. No real customer or retailer data. */
 (function(root){
 'use strict';
-function generate(){
- let seed=20261128;const rnd=()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296},int=(a,b)=>a+Math.floor(rnd()*(b-a+1)),money=x=>Math.round(x*100)/100,day=i=>new Date(Date.UTC(2026,7,30+i)).toISOString().slice(0,10);
+function generate(randomSource=null){
+ let seed=20261128;const rnd=typeof randomSource==='function'?randomSource:()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296},int=(a,b)=>a+Math.floor(rnd()*(b-a+1)),money=x=>Math.round(x*100)/100,day=i=>new Date(Date.UTC(2026,7,30+i)).toISOString().slice(0,10);
  const stores=Array.from({length:6},(_,i)=>({store_id:'S'+(i+1),city:['Casablanca','Casablanca','Rabat','Fès','Tanger','Marrakech'][i],format:i<3?'Proximité':'Supermarché',traffic_index:[1.2,.8,1.05,.9,1.15,1.3][i]}));
  const cats=['Épicerie','Boissons','Frais','Hygiène','Entretien','Surgelés'];
  const names=['Riz','Pâtes','Lentilles','Farine','Huile','Café','Thé','Biscuits','Chocolat','Conserve','Eau','Jus','Soda','Lait UHT','Eau gazeuse','Thé glacé','Boisson fruit','Sirop','Eau minérale','Nectar','Yaourt','Lait frais','Fromage','Dessert','Salade','Jambon de dinde','Crème','Beurre','Jus frais','Œufs','Savon','Shampooing','Dentifrice','Gel douche','Déodorant','Mouchoirs','Crème mains','Brosse à dents','Coton','Lingettes','Lessive','Liquide vaisselle','Nettoyant sol','Éponge','Sac poubelle','Désinfectant','Détartrant','Papier ménage','Nettoyant vitre','Assouplissant','Petits pois','Frites','Pizza','Glace','Poisson','Légumes','Fruits rouges','Nuggets','Pâte feuilletée','Haricots'];
