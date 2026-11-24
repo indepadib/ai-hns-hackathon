@@ -1,7 +1,7 @@
 'use strict';
 import {targets,batchLimit,campaignMetrics,batchCandidates,sendBatch} from './campaign-core.mjs';
 const $=id=>document.getElementById(id);
-const labelStatus={received:'Reçu',review:'À étudier',interview:'Entretien',selected:'Sélectionné',invited:'Invité',confirmed:'Confirmé',rejected:'Non retenu',sending:'Envoi en cours'};
+const labelStatus={received:'Reçu',review:'À étudier',interview:'Présélection / entretien',selected:'Sélectionné par les RH',invited:'Invité',confirmed:'Confirmé (historique)',rejected:'Non retenu',sending:'Envoi en cours'};
 const statusList=['received','review','interview','selected','invited','confirmed','rejected'];
 let secret='',records=[],selected=null,previousFocus=null,imported=[],cvBlobURL=null,cvRequestNumber=0;
 let missionStatus=new Map(), missionUnavailable=false;
@@ -41,7 +41,7 @@ function render(){updateMetrics();renderCampaignMetrics();const list=matchingRec
  for(const r of list){
   const tr=el('tr');const c1=el('td');c1.append(el('strong','',r.name||'Sans nom'),el('small','',r.email||''));
   const c2=el('td','',r.track||'—');const c3=el('td');const meter=el('div','meter'),bar=el('span','bar'),fill=el('i');fill.style.width=`${r.triage?.score||0}%`;bar.append(fill);meter.append(bar,el('span','',scoreText(r)));c3.append(meter);
-  const c4=el('td');c4.append(statusPill(r.status));const c5=el('td','',new Date(r.createdAt).toLocaleDateString('fr-MA',{day:'2-digit',month:'short',year:'numeric'}));
+  const c4=el('td');c4.append(statusPill(r.status));const op=missionStatus.get(r.id);if(op?.rsvp==='confirmed')c4.append(el('small','','Participation confirmée'));else if(op?.rsvp==='declined')c4.append(el('small','','Participation déclinée'));if(op?.checkedInAt)c4.append(el('small','','Présence validée'));const c5=el('td','',new Date(r.createdAt).toLocaleDateString('fr-MA',{day:'2-digit',month:'short',year:'numeric'}));
   for(const [cell,label] of [[c1,'Candidat'],[c2,'Verticale'],[c3,'Documentation'],[c4,'Statut RH'],[c5,'Date']]) cell.dataset.label=label;
   const c6=el('td'),btn=el('button','more','Voir le dossier →');btn.addEventListener('click',()=>openDrawer(r.id));c6.dataset.label='';c6.append(btn);tr.append(c1,c2,c3,c4,c5,c6);body.append(tr);
  }
@@ -95,7 +95,7 @@ function drawDetail(){const r=selected;if(!r)return;clearCVPreview();const root=
  addSection(root,'IDÉE D’AGENT IA POUR H&S',r.data?.ai_agent_idea||'Non renseigné');
  const links=el('div');if(r.data?.portfolio){try{const u=new URL(r.data.portfolio);if(['https:','http:'].includes(u.protocol)){const a=el('a','',r.data.portfolio);a.href=u.href;a.target='_blank';a.rel='noopener noreferrer';a.style.textDecoration='underline';links.append(a)}}catch{}}
  if(!links.childNodes.length)links.append(el('p','','Aucun lien de projet renseigné.'));addSection(root,'PORTFOLIO',links);
- const actions=el('div','status-actions');for(const status of statusList){if(status==='invited')continue;const b=el('button',status===r.status?'active':'',labelStatus[status]);b.disabled=status===r.status||r.status==='invited'&&status!=='confirmed';b.addEventListener('click',()=>setStatus(status));actions.append(b)}addSection(root,'DÉCISION RH · MANUELLE',actions);
+ const actions=el('div','status-actions');for(const status of statusList){if(['invited','confirmed'].includes(status))continue;const b=el('button',status===r.status?'active':'',labelStatus[status]);b.disabled=status===r.status||!!r.invitedAt||['invited','confirmed'].includes(r.status);b.addEventListener('click',()=>setStatus(status));actions.append(b)}if(r.status==='confirmed'&&!r.invitedAt)actions.append(el('p','','Ancienne présélection : utilisez « Corriger les anciens statuts » dans le cockpit. Les confirmations RSVP restent distinctes.'));addSection(root,'DÉCISION RH · MANUELLE',actions);
  const notes=el('div','notes');for(const n of [...(r.notes||[])].reverse()){const item=el('div','note-item');item.append(el('small','',new Date(n.at).toLocaleString('fr-MA')),el('p','',n.text));notes.append(item)}const label=el('label','','Ajouter une observation interne');label.setAttribute('for','noteText');const textarea=el('textarea');textarea.id='noteText';textarea.maxLength=1200;textarea.placeholder='À vérifier en entretien, retour du référent métier…';notes.append(label,textarea);addSection(root,'NOTES INTERNES',notes);
  const op=missionStatus.get(r.id),panel=el('div','hns-pass-status');panel.append(el('p','',missionUnavailable?'Connexion opérationnelle indisponible — aucun envoi possible.':op?'Pass : '+passLabel(op.passStatus)+' · Email : '+passLabel(op.mailStatus)+' · Réponse : '+passLabel(op.rsvp):'Pass non préparé.'));if(op?.checkedInAt)panel.append(el('p','','Arrivée : '+new Date(op.checkedInAt).toLocaleString('fr-MA')));const go=el('a','','Ouvrir Mission Control');go.href='/mission-control/';go.onclick=async e=>{e.preventDefault();try{const session=await missionApi({action:'rh-session'});if(session.role!=='rh'||!session.token)throw Error('Session RH indisponible');sessionStorage.setItem('hns_mission_token',session.token);sessionStorage.setItem('hns_mission_role','rh');location.assign('/mission-control/')}catch(err){notify(err.message,true)}};panel.append(go);addSection(root,'PASS & PARTICIPATION',panel);
  $('sendInvite').disabled=!['selected','invited','confirmed'].includes(r.status)||missionUnavailable;$('sendInvite').textContent='Prévisualiser le pass';
@@ -167,4 +167,37 @@ $('sendCampaign').onclick=async()=>{
   campaignChosen.clear();await load();await gmailStatus();
  }catch(e){$('campaignProgress').textContent='Actualisation impossible. Vérifiez les statuts dans Gmail avant toute relance.'}
  finally{campaignRunning=false;$('stopCampaign').hidden=true;renderCampaignRows();renderCampaignMetrics()}
+};
+
+let resetSnapshot=null,resetRunning=false;
+function setResetBusy(busy){resetRunning=busy;$('closeReset').disabled=busy;$('refreshReset').disabled=busy;$('resetIncludeSelected').disabled=busy;$('applyReset').disabled=busy||!resetSnapshot?.eligible.length;}
+async function analyzeReset(){
+ if(resetRunning||!secret)return;
+ resetSnapshot=null;setResetBusy(true);$('resetSummary').textContent='Analyse sécurisée de l’historique, des emails et des réponses…';$('resetRows').replaceChildren();
+ try{
+  const includeSelected=$('resetIncludeSelected').checked;
+  const data=await missionApi({action:'rh-reset-preview',includeSelected});
+  resetSnapshot={eligible:data.eligible||[],protected:data.protected||[],includeSelected};
+  $('resetSummary').textContent=resetSnapshot.eligible.length+' dossier(s) à reclasser · '+resetSnapshot.protected.length+' protégé(s). Aucun email ne sera envoyé.';
+  for(const [list,label] of [[resetSnapshot.eligible,'À reclasser'],[resetSnapshot.protected,'Protégé — inchangé']]){
+   for(const r of list){const item=el('div','campaign-row');const info=el('div');info.append(el('strong','',r.name||'Sans nom'),el('small','',label+' · '+(labelStatus[r.status]||r.status)));item.append(info);$('resetRows').append(item);}
+  }
+ }catch(e){$('resetSummary').textContent=e.message;resetSnapshot=null}finally{setResetBusy(false)}
+}
+$('openReset').onclick=()=>{if(campaignRunning)return notify('Terminez le lot d’invitations avant de reclasser.',true);$('resetIncludeSelected').checked=false;resetSnapshot=null;$('resetDialog').showModal();void analyzeReset()};
+$('refreshReset').onclick=analyzeReset;
+$('resetIncludeSelected').onchange=analyzeReset;
+$('closeReset').onclick=()=>{if(!resetRunning)$('resetDialog').close()};
+$('resetDialog').addEventListener('cancel',e=>{if(resetRunning)e.preventDefault()});
+$('applyReset').onclick=async()=>{
+ if(resetRunning||campaignRunning||!resetSnapshot?.eligible.length)return;
+ const snapshot=resetSnapshot,ids=snapshot.eligible.map(r=>r.id);
+ if(!confirm('Reclasser '+ids.length+' dossiers dans Présélection / entretien ? Les invitations et réponses existantes seront protégées. Aucun email ne sera envoyé.'))return;
+ setResetBusy(true);let moved=0,skipped=0,processed=0;
+ try{
+  for(let i=0;i<ids.length;i+=20){const result=await missionApi({action:'rh-reset-apply',includeSelected:snapshot.includeSelected,ids:ids.slice(i,i+20),confirm:true});for(const entry of result.results||[]){processed++;if(entry.state==='moved')moved++;else skipped++;}$('resetSummary').textContent=processed+'/'+ids.length+' traité(s) · '+moved+' reclassé(s) · '+skipped+' protégé(s) ou à vérifier.';}
+  resetSnapshot=null;$('resetRows').replaceChildren();await load();
+  $('resetSummary').textContent=moved+' dossier(s) reclassé(s) dans Présélection / entretien. '+skipped+' dossier(s) non modifié(s). Aucun email envoyé.';
+ }catch(e){resetSnapshot=null;$('resetSummary').textContent=moved+' modification(s) confirmée(s) avant interruption. Actualisez l’analyse avant toute nouvelle opération.';try{await load()}catch{}}
+ finally{setResetBusy(false)}
 };
