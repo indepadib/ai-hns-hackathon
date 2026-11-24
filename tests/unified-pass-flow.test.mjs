@@ -56,7 +56,11 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   assert.equal((await call({action:'invitation-rsvp',code,response:'confirmed'})).status,200);
   const status=await call({action:'recruitment-status',candidateIds:[candidateId]},admin);assert.equal(status.status,200);assert.equal(status.data.entries[0].rsvp,'confirmed');assert.equal(status.data.entries[0].mailStatus,'accepted');
   const staff=await call({action:'rh-login',password:env.HNS_RH_KEY});assert.equal(staff.status,200);const token=staff.data.token;
-  const qr=qrPayload(id,env.HNS_SESSION_SECRET);const scan=await call({action:'scan-invitation',code:qr},token);assert.equal(scan.status,200,JSON.stringify(scan.data));
+  const qr=qrPayload(id,env.HNS_SESSION_SECRET);
+  assert.equal((await call({action:'invitation-rsvp',code,response:'declined'})).status,200);
+  assert.equal((await call({action:'scan-invitation',code:qr},token)).status,409);
+  assert.equal((await call({action:'invitation-rsvp',code,response:'confirmed'})).status,200);
+  const scan=await call({action:'scan-invitation',code},token);assert.equal(scan.status,200,JSON.stringify(scan.data));
   assert.equal((await call({action:'scan-invitation',code:qr},token)).data.alreadyPresent,true);
   assert.equal((await call({action:'participant-login',code})).status,200);
   const after=await call({action:'recruitment-status',candidateIds:[candidateId]},admin);assert.ok(after.data.entries[0].checkedInAt);
