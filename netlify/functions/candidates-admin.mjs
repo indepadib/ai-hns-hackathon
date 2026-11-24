@@ -16,8 +16,8 @@ async function modify(store,id,updater){
  const next=updater(current.data);const result=await store.setJSON(id,next,{onlyIfMatch:current.etag});
  return result.modified?{record:next}:{conflict:true};
 }
-export default async(request)=>{
- if(process.env.CONTEXT&&process.env.CONTEXT!=='production')return response({error:'Disponible uniquement en production'},403);
+export default async(request,context)=>{
+ if(context?.site?.id!=='33dae2ce-086d-4470-b6fe-248f3ca49b70'||context?.deploy?.context!=='production'||new URL(request.url).hostname!=='ai.hns.ma')return response({error:'Disponible uniquement en production'},403);
  if(!['GET','POST'].includes(request.method))return response({error:'Méthode non autorisée'},405);
  const origin=request.headers.get('origin');if(origin && origin!==new URL(request.url).origin)return response({error:'Origine refusée'},403);
  if(!auth(request))return response({error:'Accès non autorisé'},401);
