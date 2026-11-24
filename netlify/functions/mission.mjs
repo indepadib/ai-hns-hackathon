@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import {resetEligibility,resetRecord} from '../../lib/rh-preselection.mjs';
 import {invitationBlocker} from '../../lib/invitation-readiness.mjs';
 import {oauthConfig,beginOAuth,oauthAccess,oauthStatus,gmailSend,connectionKey,mailbox} from '../../lib/gmail-oauth.mjs';
 import {deliveryConfig,deliverInvitation} from '../../lib/invitation-delivery.mjs';
@@ -92,6 +93,31 @@ export default async function handler(request,context){
     if(write?.modified)return json({rsvp:next.rsvp,respondedAt:next.respondedAt});
    }
    return fail('Réponse concurrente, réessayez',409);
+  }
+  if(action==='rh-reset-preview'||action==='rh-reset-apply'){
+   if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
+   const includeSelected=body.includeSelected===true;
+   const rh=recruitmentStore();
+   const inspect=async row=>{
+    if(!validCandidateId(row?.id))return false;
+    const code=createHmac('sha256',secret).update('invitation-v1:'+row.id).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32);
+    const [pass,mail]=await Promise.all([db.get(participantKey(id),{type:'json'}),db.get('invitation-mail-'+id,{type:'json'})]);
+    return resetEligibility(row,pass,mail,{includeSelected});
+   };
+   if(action==='rh-reset-preview'){
+    const rows=(await recruitmentRows()).filter(r=>r.status==='confirmed'||includeSelected&&r.status==='selected');
+    const eligible=[],protectedRows=[];
+    for(let i=0;i<rows.length;i+=20){const chunk=rows.slice(i,i+20);const flags=await Promise.all(chunk.map(inspect));chunk.forEach((r,j)=>(flags[j]?eligible:protectedRows).push({id:r.id,name:r.name,status:r.status}));}
+    return json({eligible,protected:protectedRows});
+   }
+   if(body.confirm!==true||!Array.isArray(body.ids)||!body.ids.length||body.ids.length>20||new Set(body.ids).size!==body.ids.length||body.ids.some(x=>!validCandidateId(x)))return fail('Confirmez un lot de 1 à 20 dossiers',400);
+   const results=[];
+   for(const id of body.ids){
+    try{const current=await rh.getWithMetadata(id,{type:'json'});if(!current?.etag||!await inspect(current.data)){results.push({id,state:'protected'});continue}
+     const write=await rh.setJSON(id,resetRecord(current.data,new Date().toISOString()),{onlyIfMatch:current.etag});results.push({id,state:write?.modified?'moved':'conflict'});
+    }catch{results.push({id,state:'review'});}
+   }
+   return json({results});
   }
   if(action==='recruitment-status'){
    if(!isLive(request,context))return fail('Synchronisation RH désactivée dans cet environnement',403);
