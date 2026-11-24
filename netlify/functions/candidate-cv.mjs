@@ -25,8 +25,8 @@ export async function findCVForEmail(email,token,fetcher=fetch){
   return null;
 }
 
-export default async function handler(request){
-  if(process.env.CONTEXT&&process.env.CONTEXT!=='production')return err('Indisponible en préproduction',403);
+export default async function handler(request,context){
+  if(context?.site?.id!=='33dae2ce-086d-4470-b6fe-248f3ca49b70'||context?.deploy?.context!=='production'||new URL(request.url).hostname!=='ai.hns.ma')return err('Indisponible en préproduction',403);
   if(request.method!=='GET')return err('Méthode non autorisée',405);
   const origin=request.headers.get('origin');if(origin&&origin!==new URL(request.url).origin)return err('Origine refusée',403);
   const bearer=(request.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
