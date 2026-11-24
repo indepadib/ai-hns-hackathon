@@ -83,7 +83,7 @@ try{
   const download=page.waitForEvent('download');await page.locator('#starter-code').click();assert.equal((await download).suggestedFilename(),'starter.py');
   await page.locator('.starter-kit summary').click();
   assert.match(await page.locator('.starter-source').innerText(),/def predict\(row\):/);
-  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true,'Participant horizontal overflow');
+  const layout=await page.evaluate(()=>({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('main *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.getBoundingClientRect().width>0&&!e.closest('.lab-table,.starter-source,.explore-tables,.demo-track')).slice(0,12).map(e=>({tag:e.tagName,cls:String(e.className).slice(0,100),right:Math.round(e.getBoundingClientRect().right)}))}));console.log('Participant layout',JSON.stringify(layout));assert.ok(layout.scrollWidth<=layout.viewport+1,'Participant horizontal overflow: '+JSON.stringify(layout));
   assert.deepEqual(errors,[]);
   await page.screenshot({path:'browser-review/starter-'+viewport.width+'.png',fullPage:true});
   await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
