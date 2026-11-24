@@ -50,4 +50,42 @@ try{
   await context.close();
   console.log('Arrival express verified:',viewport.width,'px');
  }
+ for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
+  const context=await browser.newContext({viewport,acceptDownloads:true}),page=await context.newPage(),errors=[];
+  page.on('pageerror',err=>errors.push(err.message));
+  const stages=['checkin','briefing','matching','challenge','problem','solution','build','redteam','pitch','submission'].map((id,i)=>({id,label:id,opensAt:i,unlocked:true}));
+  let workspace={},version=0;
+  await page.route('**/api/mission',async route=>{
+   const req=route.request();let out={},status=200;
+   if(req.method()==='GET')out={service:'hns-mission'};
+   else{const body=req.postDataJSON();switch(body.action){
+    case 'me':out={role:'participant'};break;
+    case 'schedule':out={now:Date.now(),stages};break;
+    case 'matching-list':out={people:[],choice:'solo',team:null};break;
+    case 'load':out={workspace,version,submitted:false};break;
+    case 'save':workspace=body.workspace;out={version:++version};break;
+    default:status=400;out={error:'Unexpected mock request '+body.action};
+   }}
+   await route.fulfill({status,json:out});
+  });
+  await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-participant');sessionStorage.setItem('hns_mission_role','participant')});
+  await page.goto(base+'/mission-control/');
+  await page.locator('.flight-plan').waitFor();
+  assert.match(await page.locator('.flight-total strong').innerText(),/0\/6/);
+  assert.equal(await page.locator('.welcome-next strong').innerText(),'challenge');
+  await page.locator('#home-resume').click();
+  await page.locator('[data-challenge="availability"]').click();
+  await page.locator('#mission-home').click();
+  assert.match(await page.locator('.flight-total strong').innerText(),/1\/6/);
+  assert.equal(await page.locator('.welcome-next strong').innerText(),'problem');
+  await page.locator('.flight-grid [data-home-mission="build"]').click();
+  await page.locator('#starter-code').waitFor();
+  const download=page.waitForEvent('download');await page.locator('#starter-code').click();assert.equal((await download).suggestedFilename(),'starter.py');
+  await page.locator('.starter-kit summary').click();
+  assert.match(await page.locator('.starter-source').innerText(),/def predict\(row\):/);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1),true,'Participant horizontal overflow');
+  assert.deepEqual(errors,[]);
+  await page.screenshot({path:'browser-review/starter-'+viewport.width+'.png',fullPage:true});
+  await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
+ }
 }finally{await browser.close()}
