@@ -1,9 +1,11 @@
 'use strict';
+import {targets,batchLimit,campaignMetrics,batchCandidates,sendBatch} from './campaign-core.mjs';
 const $=id=>document.getElementById(id);
 const labelStatus={received:'Reçu',review:'À étudier',interview:'Entretien',selected:'Sélectionné',invited:'Invité',confirmed:'Confirmé',rejected:'Non retenu',sending:'Envoi en cours'};
 const statusList=['received','review','interview','selected','invited','confirmed','rejected'];
 let secret='',records=[],selected=null,previousFocus=null,imported=[],cvBlobURL=null,cvRequestNumber=0;
 let missionStatus=new Map(), missionUnavailable=false;
+let gmailReady=false,campaignRunning=false,campaignStop=false,campaignChosen=new Set();
 const txt=(s)=>document.createTextNode(String(s??''));
 function el(tag,className='',value){const x=document.createElement(tag);if(className)x.className=className;if(value!==undefined)x.textContent=String(value);return x;}
 function notify(message,error=false){const e=$('toast');e.textContent=message;e.hidden=false;e.style.background=error?'#803f37':'#193d30';clearTimeout(notify.timeout);notify.timeout=setTimeout(()=>e.hidden=true,5200);}
@@ -34,7 +36,7 @@ function matchingRecords(){
  list.sort((a,b)=>sort==='documented'?(b.triage?.score||0)-(a.triage?.score||0):sort==='oldest'?(a.createdAt||'').localeCompare(b.createdAt||''):(b.createdAt||'').localeCompare(a.createdAt||''));
  return list;
 }
-function render(){updateMetrics();const list=matchingRecords(),body=$('rows');body.replaceChildren();$('countLabel').textContent=`${list.length} dossier(s) affiché(s) sur ${records.length}`;
+function render(){updateMetrics();renderCampaignMetrics();const list=matchingRecords(),body=$('rows');body.replaceChildren();$('countLabel').textContent=`${list.length} dossier(s) affiché(s) sur ${records.length}`;
  if(!list.length){const tr=el('tr');const td=el('td','empty','Aucune candidature trouvée. Modifie les filtres ou importe les anciens dossiers.');td.colSpan=6;tr.append(td);body.append(tr);return}
  for(const r of list){
   const tr=el('tr');const c1=el('td');c1.append(el('strong','',r.name||'Sans nom'),el('small','',r.email||''));
@@ -109,7 +111,7 @@ function exportCSV(){const cols=['Date','Nom','Email','Verticale','Parcours','St
 function csvParse(raw){const rows=[];let row=[],v='',q=false;for(let i=0;i<raw.length;i++){const ch=raw[i];if(ch==='"'){if(q&&raw[i+1]==='"'){v+='"';i++}else q=!q}else if(ch===','&&!q){row.push(v);v=''}else if((ch==='\n'||ch==='\r')&&!q){if(ch==='\r'&&raw[i+1]==='\n')i++;row.push(v);rows.push(row);row=[];v=''}else v+=ch}if(v||row.length){row.push(v);rows.push(row)}if(rows.length<2)return [];const headings=rows.shift().map(h=>h.replace(/^\ufeff/,'').trim().toLowerCase().replace(/[^a-z0-9_]/g,''));return rows.map(row=>Object.fromEntries(headings.map((h,i)=>[h,row[i]||'']))).filter(x=>Object.values(x).some(Boolean))}
 function normalizeImport(row){const aliases={name:['name','nom','fullname','nomcomplet'],email:['email','emailaddress','courriel'],school:['school','ecole','parcours'],status:['status','statut'],created_at:['created_at','createdat','date','submittedat'],project:['project','projet'],obstacle:['obstacle'],portfolio:['portfolio','lien'],ai_tools:['ai_tools','aitools'],ai_usage:['ai_usage','aiusage'],ai_agents:['ai_agents','aiagents'],ai_agent_idea:['ai_agent_idea','aiagentidea'],track:['track','verticale'],format:['format'],opportunity:['opportunity'],city:['city','ville'],availability:['availability'],source:['source'],consent:['consent'],cv:['cv']};const out={};for(const [field,names] of Object.entries(aliases)){const key=names.find(k=>row[k]!==undefined);out[field]=key?row[key]:''}return out}
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();secret=$('adminKey').value.trim();$('adminKey').value='';try{await load();$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;void gmailStatus()}catch(err){secret='';notify(err.message,true)}});
-$('logout').onclick=()=>{sessionStorage.removeItem('hns_mission_token');sessionStorage.removeItem('hns_mission_role');clearCVPreview();secret='';records=[];selected=null;closeDrawer();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;notify('Session fermée')};
+$('logout').onclick=()=>{campaignStop=true;gmailReady=false;campaignChosen.clear();sessionStorage.removeItem('hns_mission_token');sessionStorage.removeItem('hns_mission_role');clearCVPreview();secret='';records=[];selected=null;closeDrawer();$('workspace').hidden=true;$('login').hidden=false;$('logout').hidden=true;notify('Session fermée')};
 $('refresh').onclick=()=>load().catch(e=>notify(e.message,true));$('exportCsv').onclick=exportCSV;
 for(const id of ['search','filterStatus','filterTrack','sortBy'])$(id).addEventListener(id==='search'?'input':'change',render);
 $('closeDrawer').onclick=closeDrawer;$('shade').onclick=closeDrawer;document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('drawer').hidden)closeDrawer()});$('saveNote').onclick=addNote;$('sendInvite').onclick=invite;
@@ -117,8 +119,52 @@ $('openImport').onclick=()=>$('importDialog').showModal();
 $('importCsv').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;try{const rows=csvParse(await f.text()).map(normalizeImport);imported=rows.filter(r=>r.email&&r.name);$('importPreview').textContent=`${imported.length} dossiers valides détectés. Aucun dossier existant ne sera remplacé.`;$('doImport').disabled=!imported.length}catch{notify('Fichier CSV invalide',true)}});
 $('doImport').onclick=async()=>{if(!imported.length)return;try{let count=0,skipped=0;for(let i=0;i<imported.length;i+=150){const r=await api('POST',{action:'import',records:imported.slice(i,i+150)});count+=r.imported;skipped+=r.skipped}$('importDialog').close();await load();notify(`${count} dossiers importés, ${skipped} ignorés`)}catch(e){notify(e.message,true)}};
 
-async function gmailStatus(){if(!secret)return;try{const status=await missionApi({action:'gmail-status'});$('gmailStatus').textContent=status.connected?(status.email+' · '+(status.testedAt?'Test accepté par Gmail': 'Connectée — test interne requis')+' · '+(status.sendEnabled?'Envois activés':'Envois candidats désactivés')):'Gmail non connecté · recrutement@hns.ma';$('gmailConnect').textContent=status.connected?'Reconnecter Gmail':'Connecter Gmail';$('gmailTest').disabled=!status.connected||!!status.testedAt;}catch(e){$('gmailStatus').textContent=e.message;$('gmailTest').disabled=true}}
+async function gmailStatus(){if(!secret)return;try{const status=await missionApi({action:'gmail-status'});gmailReady=!!(status.connected&&status.testedAt&&status.sendEnabled);renderCampaignMetrics();$('gmailStatus').textContent=status.connected?(status.email+' · '+(status.testedAt?'Test accepté par Gmail': 'Connectée — test interne requis')+' · '+(status.sendEnabled?'Envois activés':'Envois candidats désactivés')):'Gmail non connecté · recrutement@hns.ma';$('gmailConnect').textContent=status.connected?'Reconnecter Gmail':'Connecter Gmail';$('gmailTest').disabled=!status.connected||!!status.testedAt;}catch(e){gmailReady=false;renderCampaignMetrics();$('gmailStatus').textContent=e.message;$('gmailTest').disabled=true}}
 $('gmailCheck').onclick=gmailStatus;
 $('gmailConnect').onclick=async()=>{const popup=window.open('about:blank','_blank');if(!popup){notify('Autorisez les fenêtres contextuelles pour connecter Gmail.',true);return}popup.opener=null;try{const r=await missionApi({action:'gmail-connect'});const url=new URL(r.url);if(url.origin!=='https://accounts.google.com')throw Error('URL Google invalide');popup.location.href=url.href;$('gmailStatus').textContent='Autorisez Gmail dans le nouvel onglet, puis actualisez le statut.'}catch(e){popup.close();notify(e.message,true)}};
 $('gmailTest').onclick=async()=>{if(!confirm('Envoyer un unique email de test à recrutement@hns.ma ? Aucun candidat ne sera contacté.'))return;$('gmailTest').disabled=true;try{await missionApi({action:'gmail-test',confirm:true});notify('Test accepté par Gmail. Vérifiez la boîte de réception.')}catch(e){notify(e.message,true)}finally{await gmailStatus()}};
 window.addEventListener('focus',()=>{if(secret)void gmailStatus()});
+
+function renderCampaignMetrics(){
+ const m=campaignMetrics(records,missionStatus);
+ const metrics=[['Dossiers en revue / validés',m.shortlist,'Objectif '+targets.shortlist],['Validés · à inviter',m.ready,'Sélection RH requise'],['Invitations acceptées',m.accepted,'Objectif '+targets.invited],['Confirmations RSVP',m.confirmed,m.pending+' réponses attendues'],['Présents',m.present,'Objectif '+targets.present],['Déclinés',m.declined,'Réponses négatives']];
+ $('campaignMetrics').replaceChildren(...metrics.map(([label,value,detail])=>{const card=el('article','campaign-metric');card.append(el('span','',label),el('strong','',missionUnavailable?'—':value),el('small','',detail));return card}));
+ $('campaignSummary').textContent=missionUnavailable?'Synchronisation indisponible — envois bloqués.':m.selected+' dossiers au statut sélectionné · '+m.ready+' prêts à inviter · '+m.legacyInvited+' invitations RH historiques / manuelles';
+ $('campaignAlerts').textContent=missionUnavailable?'Actualisez les données avant de préparer un lot.':m.review?m.review+' envoi(s) à contrôler dans Gmail. Aucune relance automatique.':!gmailReady?'Messagerie non activée : connectez Gmail et vérifiez le test.':'Les invitations sont individuelles. Aucun destinataire en copie.';
+ $('openCampaign').disabled=!secret||missionUnavailable||!gmailReady||!m.ready||campaignRunning;
+}
+function renderCampaignRows(){
+ const list=batchCandidates(records,missionStatus);
+ $('campaignRows').replaceChildren(...list.map(r=>{
+  const label=el('label','campaign-row');const cb=el('input');cb.type='checkbox';cb.checked=campaignChosen.has(r.id);cb.disabled=campaignRunning;cb.onchange=()=>{if(cb.checked){if(campaignChosen.size>=batchLimit){cb.checked=false;notify('Maximum '+batchLimit+' destinataires par lot.',true);return}campaignChosen.add(r.id)}else campaignChosen.delete(r.id);updateCampaignSelection()};const info=el('div');info.append(el('strong','',r.name||'Sans nom'),el('small','',r.email),el('small','',r.track||'Verticale non renseignée'));label.append(cb,info);return label;
+ }));
+ if(!list.length)$('campaignRows').append(el('p','','Aucun dossier sélectionné et éligible.'));
+ updateCampaignSelection();
+}
+function updateCampaignSelection(){
+ $('campaignSelection').textContent=campaignChosen.size+' destinataire(s) sur '+batchLimit+' maximum';
+ $('sendCampaign').textContent='Envoyer '+campaignChosen.size+' invitation(s)';
+ $('sendCampaign').disabled=campaignRunning||!gmailReady||!campaignChosen.size;
+ $('selectCampaign').disabled=campaignRunning;$('clearCampaign').disabled=campaignRunning;
+ $('closeCampaign').disabled=campaignRunning;
+}
+$('openCampaign').onclick=()=>{if(!gmailReady||missionUnavailable)return;campaignChosen.clear();$('campaignProgress').textContent='Vérifiez les noms et adresses avant de valider.';renderCampaignRows();$('campaignDialog').showModal()};
+$('selectCampaign').onclick=()=>{if(campaignRunning)return;campaignChosen=new Set(batchCandidates(records,missionStatus).slice(0,batchLimit).map(r=>r.id));renderCampaignRows()};
+$('clearCampaign').onclick=()=>{campaignChosen.clear();renderCampaignRows()};
+$('closeCampaign').onclick=()=>{if(!campaignRunning)$('campaignDialog').close()};
+$('campaignDialog').addEventListener('cancel',e=>{if(campaignRunning)e.preventDefault()});
+$('stopCampaign').onclick=()=>{campaignStop=true;$('campaignProgress').textContent='Arrêt demandé après la requête en cours.'};
+$('sendCampaign').onclick=async()=>{
+ if(campaignRunning||!gmailReady||missionUnavailable)return;
+ const eligible=new Set(batchCandidates(records,missionStatus).map(r=>r.id)),ids=[...campaignChosen].filter(id=>eligible.has(id));
+ if(!ids.length||ids.length!==campaignChosen.size)return notify('La sélection a changé. Actualisez le lot.',true);
+ if(!confirm('Envoyer réellement '+ids.length+' invitations individuelles depuis recrutement@hns.ma aux destinataires cochés ?'))return;
+ campaignRunning=true;campaignStop=false;$('stopCampaign').hidden=false;renderCampaignRows();renderCampaignMetrics();
+ try{
+  const result=await sendBatch(ids,id=>missionApi({action:'rh-pass-send',candidateId:id,confirm:true}),(item,n)=>{$('campaignProgress').textContent=n+'/'+ids.length+' traité(s) · '+(item.state==='accepted'?'Accepté par Gmail':'Résultat à contrôler : lot interrompu')},()=>campaignStop||!secret);
+  const accepted=result.results.filter(x=>x.state==='accepted').length,review=result.results.length-accepted;
+  $('campaignProgress').textContent=accepted+' accepté(s) · '+review+' à contrôler · '+result.remaining+' non traité(s). Aucun renvoi automatique.';
+  campaignChosen.clear();await load();await gmailStatus();
+ }catch(e){$('campaignProgress').textContent='Actualisation impossible. Vérifiez les statuts dans Gmail avant toute relance.'}
+ finally{campaignRunning=false;$('stopCampaign').hidden=true;renderCampaignRows();renderCampaignMetrics()}
+};
