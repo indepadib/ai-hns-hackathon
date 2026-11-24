@@ -4,6 +4,10 @@ import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
 import {teamSignals} from '../../lib/team-signals.mjs';
+import '../../public/mission-control/retail-data.js';
+import '../../public/mission-control/benchmark.js';
+const benchmarkSignature=(report,key,secret)=>createHmac('sha256',secret).update('benchmark-v1|'+key+'|'+JSON.stringify(report)).digest('hex');
+let cachedRetail=null;
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
 const fail=(message,status=400,code='REQUEST_FAILED')=>json({error:message,code},status);
 const hash=value=>createHash('sha256').update(String(value)).digest('hex');
@@ -270,6 +274,14 @@ export default async function handler(request){
   const metadata=await db.getWithMetadata(dossierKey,{type:'json'});
   if(!metadata?.data||!metadata.etag)return fail('Dossier indisponible',409);
   const dossier=metadata.data;
+  if(action==='benchmark-evaluate'){
+   if(!isOpen('build'))return fail('Banc d’essai pas encore ouvert',403,'STAGE_LOCKED');
+   if(dossier.submitted)return fail('Dossier déjà soumis',409);
+   if((body.teamId||null)!==(matchedId||null))return fail('Votre équipe a changé. Rechargez le dossier.',409,'TEAM_CHANGED');
+   if(!Object.hasOwn(globalThis.HNSBenchmark.descriptions,body.challenge)||!Array.isArray(body.values)||body.values.length>10000)return fail('Prédictions invalides');
+   if(dossier.workspace?.challenge?.id!==body.challenge)return fail('Enregistrez d’abord le challenge sélectionné.',409,'BENCHMARK_CHALLENGE');
+   try{cachedRetail||=globalThis.HNSRetailData.generate();const data=globalThis.HNSBenchmark.dataset(body.challenge,cachedRetail);const result=globalThis.HNSBenchmark.report(data,body.values);const report={...result,computedAt:new Date().toISOString(),predictionHash:hash(JSON.stringify(body.values))};return json({report,signature:benchmarkSignature(report,dossierKey,secret)})}catch(err){return fail(err.message||'Évaluation impossible')}
+  }
   if(action==='save'){
    if(!isOpen('challenge')&&!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
    if(dossier.submitted)return fail('Dossier déjà soumis',409);
@@ -277,6 +289,7 @@ export default async function handler(request){
    const w=body.workspace;if(!w||typeof w!=='object'||Array.isArray(w))return fail('Dossier invalide');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
    const stageFor={problem:'problem',solution:'solution',tasks:'build',tests:'build',decisions:'build',redteam:'redteam',audit:'redteam',submission:'pitch',challenge:'challenge'};const clean={...dossier.workspace};for(const k of allowed)if(w[k]!==undefined&&isOpen(stageFor[k]))clean[k]=w[k];
+   if(clean.tests?.benchmark){const b=clean.tests.benchmark;if(!b.report||b.report.challenge!==clean.challenge?.id){delete clean.tests.benchmark}else if(typeof b.signature!=='string'||!equal(b.signature,benchmarkSignature(b.report,dossierKey,secret)))return fail('Rapport de benchmark non authentifié. Relancez l’évaluation.',400,'BENCHMARK_INVALID');}
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
    dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();
    const write=await db.setJSON(dossierKey,dossier,{onlyIfMatch:metadata.etag});if(!write?.modified)return fail('Modification concurrente : rechargez le dossier',409,'VERSION_CONFLICT');
