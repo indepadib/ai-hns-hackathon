@@ -54,7 +54,7 @@ export default async function handler(request){
    const key=participantKey(hash(code).slice(0,32));
    for(let attempt=0;attempt<8;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec?.candidateId||!equal(rec.codeHash,hash(code))||rec.status!=='invited')return fail('Invitation indisponible ou déjà utilisée',404);
+    if(!rec?.candidateId||!equal(rec.codeHash,hash(code))||rec.status!=='invited'||(new URL(request.url).hostname!=='ai.hns.ma'&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation indisponible ou déjà utilisée',404);
     if(rec.rsvp===body.response)return json({rsvp:rec.rsvp,respondedAt:rec.respondedAt});
     const next={...rec,rsvp:body.response,respondedAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
@@ -188,7 +188,7 @@ export default async function handler(request){
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   return json({participants:await listParticipants(db)});
+   return json({participants:await listParticipants(db),sendEnabled:new URL(request.url).hostname==='ai.hns.ma'&&readEnv('HNS_INVITATION_SEND_ENABLED')==='true'&&!!readEnv('HNS_RESEND_API_KEY')&&!!readEnv('HNS_INVITATION_FROM')});
   }
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
@@ -218,6 +218,7 @@ export default async function handler(request){
    const reference='HNS-'+body.id.slice(0,8).toUpperCase(),name=within(row.name||rec.alias,150);
    const mail=invitationEmail({name,email,code,qrCode,participantUrl,reference,preview:staging});
    if(action==='invitation-send'){
+    if(rec.status!=='invited'||rec.rsvp==='declined')return fail('Invitation non expédiable',409);
     const apiKey=readEnv('HNS_RESEND_API_KEY'),from=readEnv('HNS_INVITATION_FROM');
     if(!apiKey||!from||/[\r\n]/.test(from))return fail('Expéditeur non configuré',503);
     const mailKey='invitation-mail-'+body.id,existing=await db.get(mailKey,{type:'json'});
@@ -288,7 +289,7 @@ export default async function handler(request){
    const id=signedId||hash(code).slice(0,32),key=participantKey(id);
    for(let attempt=0;attempt<12;attempt++){
     const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
-    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status))return fail('Invitation inconnue ou révoquée',404);
+    if(!rec||(!signedId&&!equal(rec.codeHash,hash(code)))||!rec.candidateId||!['invited','active'].includes(rec.status)||(new URL(request.url).hostname!=='ai.hns.ma'&&!rec.candidateId.startsWith('TEST-')))return fail('Invitation inconnue ou révoquée',404);
     if(rec.status==='active')return json({id,alias:rec.alias,checkedInAt:rec.checkedInAt,alreadyPresent:true});
     const next={...rec,status:'active',checkedInAt:new Date().toISOString()};
     const write=await db.setJSON(key,next,{onlyIfMatch:current.etag});
@@ -302,7 +303,7 @@ export default async function handler(request){
    if(!validId(body.id))return fail('Identifiant invalide');
    const key=participantKey(body.id),rec=await db.get(key,{type:'json'});
    if(!rec)return fail('Participant inconnu',404);
-   rec.status='revoked';rec.revokedAt=new Date().toISOString();await db.setJSON(key,rec);return json({revoked:true});
+   for(let attempt=0;attempt<8;attempt++){const current=await db.getWithMetadata(key,{type:'json'});if(!current?.data)return fail('Participant inconnu',404);if(current.data.status==='revoked')return json({revoked:true});const result=await db.setJSON(key,{...current.data,status:'revoked',revokedAt:new Date().toISOString()},{onlyIfMatch:current.etag});if(result?.modified)return json({revoked:true})}return fail('Modification concurrente : réessayez',409);
   }
   if(['jury-holdout-inputs','jury-holdout-score','jury-holdout-status'].includes(action)){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
