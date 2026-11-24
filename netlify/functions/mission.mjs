@@ -435,13 +435,17 @@ export default async function handler(request,context){
    if(!validId(body.id))return fail('Identifiant invalide');
    const values=body.scores;
    if(!values||typeof values!=='object'||!scoresNames.every(k=>Number.isInteger(values[k])&&values[k]>=0&&values[k]<=100))return fail('Notes invalides : 0 à 100');
-   const team=await db.get('team-'+body.id,{type:'json'}),key=team?'team-'+body.id:participantKey(body.id),rec=team||await db.get(key,{type:'json'});
-   if(!rec||!rec.submitted)return fail('Dossier non soumis',409);
+   const team=await db.get('team-'+body.id,{type:'json'}),key=team?'team-'+body.id:participantKey(body.id);
+   const current=await db.getWithMetadata(key,{type:'json'}),rec=current?.data;
+   if(!rec||!rec.submitted||!current.etag)return fail('Dossier non soumis',409);
+   if(Object.hasOwn(body,'expectedScoredAt')&&(body.expectedScoredAt||null)!==(rec.score?.scoredAt||null))return fail('Une autre évaluation a été enregistrée. Rechargez le dossier avant de modifier la note.',409,'JURY_CONFLICT');
    const total=Math.round((values.problem*.2+values.design*.2+values.build*.25+values.test*.2+values.demo*.15)*100)/100;
    rec.scoreHistory=Array.isArray(rec.scoreHistory)?rec.scoreHistory.slice(-99):[];
    if(rec.score)rec.scoreHistory.push(rec.score);
    rec.score={scores:Object.fromEntries(scoresNames.map(k=>[k,values[k]])),total,scoredAt:new Date().toISOString()};
-   await db.setJSON(key,rec);return json({score:rec.score});
+   const write=await db.setJSON(key,rec,{onlyIfMatch:current.etag});
+   if(!write?.modified)return fail('Modification concurrente : rechargez le dossier avant de noter.',409,'JURY_CONFLICT');
+   return json({score:rec.score});
   }
   if(auth.role!=='participant'||!validId(auth.id))return fail('Accès participant requis',403);
   const key=participantKey(auth.id),rec=await db.get(key,{type:'json'});
