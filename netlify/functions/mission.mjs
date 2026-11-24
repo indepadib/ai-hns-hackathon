@@ -88,7 +88,10 @@ export default async function handler(request){
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
    const people=await listParticipants(db);
-   return json({participants:people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}))});
+   const participants=people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}));
+   let cursor;const assigned=new Set();
+   do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const t=await db.get(entry.key,{type:'json'});if(!t)continue;(t.members||[]).forEach(id=>assigned.add(id));if(t.submitted)participants.push({id:entry.key.slice(5),alias:t.alias,team:(t.members||[]).map(id=>people.find(p=>p.id===id)?.alias||id).join(' / '),submittedAt:t.submittedAt,score:t.score||null})}cursor=page.cursor}while(cursor);
+   return json({participants:participants.filter(p=>!assigned.has(p.id)).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
   if(action==='invitation-details'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
@@ -166,7 +169,7 @@ export default async function handler(request){
   if(action==='jury-dossier'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
    if(!validId(body.id))return fail('Identifiant invalide');
-   const rec=await db.get(participantKey(body.id),{type:'json'});
+   const rec=await db.get('team-'+body.id,{type:'json'})||await db.get(participantKey(body.id),{type:'json'});
    if(!rec||!rec.submitted)return fail('Dossier non soumis',404);
    return json({id:body.id,alias:rec.alias,team:rec.team,workspace:rec.workspace||{},submittedAt:rec.submittedAt,score:rec.score||null});
   }
@@ -175,7 +178,7 @@ export default async function handler(request){
    if(!validId(body.id))return fail('Identifiant invalide');
    const values=body.scores;
    if(!values||typeof values!=='object'||!scoresNames.every(k=>Number.isInteger(values[k])&&values[k]>=0&&values[k]<=100))return fail('Notes invalides : 0 à 100');
-   const key=participantKey(body.id),rec=await db.get(key,{type:'json'});
+   const team=await db.get('team-'+body.id,{type:'json'}),key=team?'team-'+body.id:participantKey(body.id),rec=team||await db.get(key,{type:'json'});
    if(!rec||!rec.submitted)return fail('Dossier non soumis',409);
    const total=Math.round((values.problem*.2+values.design*.2+values.build*.25+values.test*.2+values.demo*.15)*100)/100;
    rec.scoreHistory=Array.isArray(rec.scoreHistory)?rec.scoreHistory.slice(-99):[];
