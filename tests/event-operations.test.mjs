@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+const read=p=>fs.readFileSync(p,'utf8');
+test('Manual check-in shares authenticated scan endpoint and retains QR scanning',()=>{const js=read('public/mission-control/app.js');assert.match(js,/id="manual-checkin"/);assert.match(js,/id="scan-start"/);assert.match(js,/api\('scan-invitation',\{code\}\)/);assert.match(js,/value="confirmed">RSVP confirmés/);assert.match(js,/ids\.length>20/);assert.match(js,/if\(review\)break/)});
+test('Restoration report is read-only and accessible through RH interface',()=>{assert.match(read('public/admin-recrutement.html'),/id="restoreReportDialog"/);assert.match(read('public/admin.js'),/missionApi\(\{action:'rh-restore-status'\}\)/);assert.match(read('netlify/functions/mission.mjs'),/if\(action==='rh-restore-status'\)/)});
