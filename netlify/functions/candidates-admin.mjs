@@ -11,9 +11,9 @@ function auth(request){
 function sanitize(r){return {...safeCandidateSummary(r),triage:triage(r)};}
 function timeEvent(action,extra={}){return {at:new Date().toISOString(),action,...extra};}
 async function modify(store,id,updater){
- const data=await store.get(id,{type:'json'});if(!data)return null;
- const meta=await store.getMetadata(id);if(!meta?.etag)return {conflict:true};
- const next=updater(data);const result=await store.setJSON(id,next,{onlyIfMatch:meta.etag});
+ const current=await store.getWithMetadata(id,{type:'json'});if(!current?.data)return null;
+ if(!current.etag)return {conflict:true};
+ const next=updater(current.data);const result=await store.setJSON(id,next,{onlyIfMatch:current.etag});
  return result.modified?{record:next}:{conflict:true};
 }
 export default async(request)=>{
@@ -37,8 +37,8 @@ export default async(request)=>{
     const id=candidateId(email),now=new Date().toISOString();const record={id,email,name:clean(data.name,120),school:clean(data.school,150),track:clean(data.track,100),data,cvFile,hasCV,status:'received',source:'netlify-csv-import',createdAt:raw.created_at&&/^\d{4}-\d\d-\d\d/.test(raw.created_at)?clean(raw.created_at,40):now,updatedAt:now,ackSentAt:null,invitedAt:null,notes:[],history:[timeEvent('imported')]};
     const r=await store.setJSON(id,record,{onlyIfNew:true});
     if(r.modified){imported++;}else{ // Backfill a CV reference from an older Netlify CSV, without overwriting RH decisions.
-      const old=await store.get(id,{type:'json'});const meta=await store.getMetadata(id);
-      if(cvFile && old && !old.cvFile && meta?.etag){const updated=await store.setJSON(id,{...old,cvFile,hasCV:true},{onlyIfMatch:meta.etag});updated.modified?imported++:skipped++;}else skipped++;
+      const current=await store.getWithMetadata(id,{type:'json'});const old=current?.data;
+      if(cvFile && old && !old.cvFile && current?.etag){const updated=await store.setJSON(id,{...old,cvFile,hasCV:true},{onlyIfMatch:current.etag});updated.modified?imported++:skipped++;}else skipped++;
     }
    }
    return response({ok:true,imported,skipped});
