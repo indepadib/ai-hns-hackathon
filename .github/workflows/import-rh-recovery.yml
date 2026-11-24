@@ -57,11 +57,15 @@ jobs:
           merci.html ee88f6c5dd33322e69d8b7dac00b8e662e8ea88d33601a8d135cd8432dce5db5
           styles.css 19c38ad9dd6cc80ff346a6a3ed2fa379d0d89f46c12a144ea228dc1cb414db1f"""
           roots=['https://6af2529e0ab21479671527f5--ai-hns-hackathon.netlify.app/','https://ai.hns.ma/']
+          missing=[]
           for line in manifest.splitlines():
               name,digest=line.split()
               paths=[name]
               if name=='index.html':paths.append('')
               elif name.endswith('.html'):paths.append(name[:-5])
+              local=pathlib.Path('public')/name
+              if local.is_file() and hashlib.sha256(local.read_bytes()).hexdigest()==digest:
+                  print('Verified local',name,flush=True);continue
               data=None
               for root in roots:
                   for urlpath in paths:
@@ -72,9 +76,11 @@ jobs:
                               data=raw;break
                       except Exception:pass
                   if data is not None:break
-              assert data is not None,'No checksum-matching public file: '+name
+              if data is None:
+                  missing.append(name);print('Missing exact file:',name,flush=True);continue
               p=pathlib.Path('public')/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_bytes(data)
               print('Verified',name,flush=True)
+          assert not missing, 'No checksum match: '+', '.join(missing)
           subprocess.run(['git','apply','--unidiff-zero','-'],input=diff,check=True)
           for name,digest in {'admin.css':'68eaa3b7aee81bcd85056558b787b1ed92a4c89eb27cdff98fc6d5a8ce137b24','admin.js':'0a8667f5255f1e491eb4c4bcf4cdd05a5f2cc2b66fb3771b3d984ff53f8ebd21','index.html':'81af7bcf3f40997836ef718276941f31c4153eb02005dffe3465831ad8a031bc'}.items():
               assert hashlib.sha256((pathlib.Path('public')/name).read_bytes()).hexdigest()==digest,name
