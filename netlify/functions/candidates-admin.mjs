@@ -22,7 +22,7 @@ export default async(request,context)=>{
  const origin=request.headers.get('origin');if(origin && origin!==new URL(request.url).origin)return response({error:'Origine refusée'},403);
  if(!auth(request))return response({error:'Accès non autorisé'},401);
  try{
-  const store=getStore(openStoreOptions());
+  const store=getStore({...openStoreOptions(),consistency:'strong'});
   if(request.method==='GET'){
    const {blobs}=await store.list();if(blobs.length>700)return response({error:'Capacité de l’outil atteinte; contacter l’administrateur'},422);
    const records=(await Promise.all(blobs.map(x=>store.get(x.key,{type:'json'})))).filter(Boolean).map(sanitize).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
@@ -45,9 +45,9 @@ export default async(request,context)=>{
   }
   if(typeof body.id!=='string'||!/^[a-f0-9]{64}$/.test(body.id))return response({error:'Dossier invalide'},400);
   if(body.action==='set-status'){
-   const status=body.status;if(!statusValues.includes(status)||status==='invited')return response({error:'Statut invalide'},422);
+   const status=body.status;if(!statusValues.includes(status)||['invited','confirmed'].includes(status))return response({error:'Les statuts Invité et Confirmé sont réservés au parcours invitation / participation. Utilisez Sélectionné pour valider un candidat.'},422);
    const result=await modify(store,body.id,r=>{
-    if(r.status==='invited'&&!['confirmed','interview'].includes(status))throw Error('Invitation déjà envoyée; action bloquée');
+    if(r.invitedAt||['invited','confirmed'].includes(r.status))throw Object.assign(Error('Dossier déjà invité ou historique à corriger via le module dédié.'),{rhProtected:true});
     return {...r,status,updatedAt:new Date().toISOString(),history:[...(r.history||[]),timeEvent('status',{value:status})].slice(-80)};});
    if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
   }
@@ -57,5 +57,5 @@ export default async(request,context)=>{
    if(!result)return response({error:'Candidat absent'},404);if(result.conflict)return response({error:'Mis à jour simultanément. Recharge la liste.'},409);return response({ok:true,record:sanitize(result.record)});
   }
   return response({error:'Utilisez le pass H&S dans la fiche candidat. Ancien envoi désactivé.'},503);
- }catch(err){console.error('H&S RH admin:',err?.message||err);return response({error:'Erreur serveur lors de la gestion RH'},500);}
+ }catch(err){if(err?.rhProtected)return response({error:err.message},409);console.error('H&S RH admin:',err?.message||err);return response({error:'Erreur serveur lors de la gestion RH'},500);}
 };

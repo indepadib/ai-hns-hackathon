@@ -26,6 +26,14 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   await rh.setJSON(candidateId,{id:candidateId,name:'TEST SYNTHETIC',email,status:'review',notes:[{text:'Preserve me'}],history:[]});
   const call=async(body,token='',host='ai.hns.ma')=>{const r=await handler(new Request('https://'+host+'/api/mission',{method:'POST',headers:{'content-type':'application/json',...(token?{authorization:'Bearer '+token}:{})},body:JSON.stringify(body)}),{site:{id:'33dae2ce-086d-4470-b6fe-248f3ca49b70'},deploy:{context:'production'}});return {status:r.status,data:await r.json()}};
   const admin=env.HNS_ADMIN_TOKEN;
+  const oldId=createHash('sha256').update('legacy@example.invalid').digest('hex');
+  await rh.setJSON(oldId,{id:oldId,email:'legacy@example.invalid',name:'LEGACY TEST',status:'confirmed',notes:[{text:'Keep legacy note'}],history:[{action:'status',value:'confirmed'}]});
+  assert.equal((await call({action:'rh-reset-preview'})).status,403);
+  assert.equal((await call({action:'rh-reset-preview'},admin,'preview.example.invalid')).status,403);
+  const plan=await call({action:'rh-reset-preview'},admin);assert.deepEqual(plan.data.eligible.map(x=>x.id),[oldId]);
+  assert.equal((await call({action:'rh-reset-apply',ids:[oldId]},admin)).status,400);
+  const moved=await call({action:'rh-reset-apply',ids:[oldId],confirm:true},admin);assert.equal(moved.data.results[0].state,'moved');assert.equal((await rh.get(oldId)).status,'interview');assert.equal((await rh.get(oldId)).notes[0].text,'Keep legacy note');
+  assert.equal((await call({action:'rh-reset-apply',ids:[oldId],confirm:true},admin)).data.results[0].state,'protected');
   assert.equal((await call({action:'rh-session'})).status,403);
   assert.equal((await call({action:'rh-session'},admin,'preview.example.invalid')).status,403);
   const shared=await call({action:'rh-session'},admin);assert.equal(shared.status,200);assert.equal(shared.data.role,'rh');

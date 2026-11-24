@@ -22,3 +22,5 @@ test('Import same email never overwrites RH decisions',async()=>{const res=await
 test('No invalid status or unsolicited email',async()=>{const v=await handler(req('GET'));const id=(await v.json()).records[0].id;const r=await handler(req('POST',{action:'set-status',id,status:'invited'}));assert.equal(r.status,422)});
 
 test('RH list is blocked outside the original production site',async()=>{assert.equal((await handler(req('GET'),{site:{id:'staging'},deploy:{context:'production'}})).status,403);assert.equal((await handler(req('GET'),{...liveContext,deploy:{context:'deploy-preview'}})).status,403)});
+
+test('Manual RH cannot assign Confirmé before invitation',async()=>{const v=await handler(req('GET'));const id=(await v.json()).records[0].id;const r=await handler(req('POST',{action:'set-status',id,status:'confirmed'}));assert.equal(r.status,422)});
