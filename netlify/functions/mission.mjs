@@ -4,6 +4,7 @@ import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
 import {teamSignals} from '../../lib/team-signals.mjs';
+import {validateObservation,validateFollowup,summarize as summarizeTalent} from '../../lib/talent-observations.mjs';
 import {privateTables,privateDataset,inputPayload,inputDigest,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
 let privateCache=null;
 import '../../public/mission-control/retail-data.js';
@@ -120,6 +121,36 @@ export default async function handler(request){
     teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:teamSignals(rec?.workspace).documented,signals:teamSignals(rec?.workspace),updatedAt:rec?.updatedAt||null,challenge:rec?.workspace?.challenge?.id||null});
    }
    return json({teams:teams.filter(t=>auth.role==='admin'||t.submitted).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
+  }
+  if(['talent-directory','talent-profile','talent-observe','talent-followup','talent-remove-note'].includes(action)){
+   if(auth.role!=='admin')return fail('Accès administrateur requis',403);
+   if(action==='talent-directory'){
+    const people=(await listParticipants(db)).filter(p=>p.status==='active'&&p.checkedInAt),profiles=new Map();let cursor;
+    do{const page=await db.list({prefix:'talent-observation-v1-',...(cursor?{cursor}:{})});for(let i=0;i<page.blobs.length;i+=16){const batch=page.blobs.slice(i,i+16);const values=await Promise.all(batch.map(e=>db.get(e.key,{type:'json'})));batch.forEach((e,j)=>profiles.set(e.key.slice('talent-observation-v1-'.length),summarizeTalent(values[j])))}cursor=page.cursor}while(cursor);
+    return json({people:people.map(p=>({id:p.id,alias:p.alias,...(profiles.get(p.id)||summarizeTalent(null))}))});
+   }
+   if(!validId(body.id))return fail('Identifiant invalide');
+   const rec=await db.get(participantKey(body.id),{type:'json'});
+   if(!rec||rec.status!=='active'||!rec.checkedInAt)return fail('Participant présent introuvable',404);
+   const key='talent-observation-v1-'+body.id;
+   if(action==='talent-profile'){
+    const profile=await db.get(key,{type:'json'})||{version:0,notes:[],followup:{status:'none'}};
+    return json({id:body.id,alias:rec.alias,profile});
+   }
+   let payload;
+   try{if(action==='talent-observe')payload=validateObservation(body.observation);if(action==='talent-followup')payload=validateFollowup(body.followup);if(action==='talent-remove-note'&&(typeof body.noteId!=='string'||!/^[0-9a-f]{24}$/.test(body.noteId)))throw Error('Observation invalide.')}catch(err){return fail(err.message)}
+   for(let i=0;i<8;i++){
+    const meta=await db.getWithMetadata(key,{type:'json'}),profile=meta?.data||{version:0,notes:[],followup:{status:'none'}};
+    if(!Number.isInteger(body.version)||body.version!==profile.version)return fail('Profil modifié dans une autre session. Actualisez avant de poursuivre.',409,'VERSION_CONFLICT');
+    const now=new Date().toISOString();
+    if(action==='talent-observe'){if(profile.notes.length>=80)return fail('Limite de 80 observations atteinte.');profile.notes.push({id:randomBytes(12).toString('hex'),...payload,at:now})}
+    if(action==='talent-followup')profile.followup={...payload,at:now};
+    if(action==='talent-remove-note'){if(!profile.notes.some(n=>n.id===body.noteId))return fail('Observation introuvable',404);profile.notes=profile.notes.filter(n=>n.id!==body.noteId)}
+    profile.version++;profile.updatedAt=now;
+    const result=await db.setJSON(key,profile,meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
+    if(result?.modified)return json({profile});
+   }
+   return fail('Modification concurrente. Actualisez le profil.',409,'VERSION_CONFLICT');
   }
   if(action==='team-inspect'){
    if(auth.role!=='admin')return fail('Accès administrateur requis',403);
