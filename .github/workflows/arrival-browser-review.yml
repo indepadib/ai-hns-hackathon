@@ -35,6 +35,7 @@ jobs:
           node scripts/day-j-browser-check.mjs
           node scripts/play-lab-browser-check.mjs
           node scripts/flow-browser-check.mjs
+          node scripts/retail-game-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
