@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check netlify/functions/mission.mjs && node --check public/mission-control/app.js",
+    "check": "node --check netlify/functions/mission.mjs && node --check public/mission-control/app.js && node --check public/scout/app.js && node --check lib/talent-scout.mjs",
     "verify": "npm run check && npm test"
   },
   "dependencies": {

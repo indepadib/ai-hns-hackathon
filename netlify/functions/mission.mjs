@@ -1,3 +1,4 @@
+import {scoutAction} from '../../lib/talent-scout.mjs';
 import {guestAction,scanGuestPass,guestArrivalCount} from '../../lib/event-guests.mjs';
 import {finalResults} from '../../lib/final-results.mjs';
 import QRCode from 'qrcode';
@@ -26,7 +27,7 @@ const hash=value=>createHash('sha256').update(String(value)).digest('hex');
 const equal=(a,b)=>{const aa=Buffer.from(String(a)),bb=Buffer.from(String(b));return aa.length===bb.length&&timingSafeEqual(aa,bb)};
 const encode=data=>Buffer.from(JSON.stringify(data)).toString('base64url');
 const sign=(data,secret)=>{const payload=encode(data);return payload+'.'+createHmac('sha256',secret).update(payload).digest('base64url')};
-const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return null;const expected=createHmac('sha256',secret).update(p).digest('base64url');if(!equal(expected,s))return null;const data=JSON.parse(Buffer.from(p,'base64url').toString('utf8'));if(!data||!Number.isFinite(data.exp)||data.exp<Date.now())return null;if(!['admin','rh','jury','participant'].includes(data.role))return null;return data}catch{return null}};
+const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return null;const expected=createHmac('sha256',secret).update(p).digest('base64url');if(!equal(expected,s))return null;const data=JSON.parse(Buffer.from(p,'base64url').toString('utf8'));if(!data||!Number.isFinite(data.exp)||data.exp<Date.now())return null;if(!['admin','rh','jury','participant','mentor'].includes(data.role))return null;return data}catch{return null}};
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{32}$/.test(id);
 const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
@@ -163,6 +164,8 @@ export default async function handler(request,context){
   }
   const raw=String(request.headers.get('authorization')||''),token=raw.replace(/^Bearer\s+/i,'');
   let auth=verify(token,secret);
+  if(action.startsWith('scout-')){if(!isLive(request,context))return fail('Espace terrain réservé au site officiel',403);const out=await scoutAction({action,body,auth,db,secret,listParticipants,recruitmentCandidate,sign,renderQR:code=>QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320})});return json(out.value,out.status)}
+  if(auth?.role==='mentor')return fail('Accès limité à Talent Scout',403);
   if(action==='rh-pass-preview'||action==='rh-pass-send'){
    if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
    if(!validCandidateId(body.candidateId))return fail('Dossier invalide');
