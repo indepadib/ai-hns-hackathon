@@ -1,3 +1,4 @@
+import {nonselectionAction} from '../../lib/nonselection-mail.mjs';
 import {scoutAction} from '../../lib/talent-scout.mjs';
 import {guestAction,scanGuestPass,guestArrivalCount} from '../../lib/event-guests.mjs';
 import {finalResults} from '../../lib/final-results.mjs';
@@ -141,6 +142,13 @@ export default async function handler(request,context){
     }catch{results.push({id,state:'review'});}
    }
    return json({results});
+  }
+  if(['rh-nonselection-status','rh-nonselection-preview','rh-nonselection-send'].includes(action)){
+   if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
+   const enabled=canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
+   const operations=async candidateId=>{const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32);const [pass,invitation]=await Promise.all([db.get(participantKey(id),{type:'json'}),db.get('invitation-mail-'+id,{type:'json'})]);return{pass,invitation}};
+   const result=await nonselectionAction({action,body,rh:recruitmentStore(),operations,enabled,deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
+   return json(result.value,result.status);
   }
   if(action==='recruitment-status'){
    if(!isLive(request,context))return fail('Synchronisation RH désactivée dans cet environnement',403);

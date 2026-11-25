@@ -7,6 +7,10 @@ on:
       - 'scripts/guest-browser-check.mjs'
       - 'public/invites/**'
       - 'public/scout/**'
+      - 'public/admin.js'
+      - 'public/admin.css'
+      - 'scripts/nonselection-browser-check.mjs'
+      - 'scripts/day-j-browser-check.mjs'
       - 'scripts/scout-browser-check.mjs'
       - '.github/workflows/arrival-browser-review.yml'
 permissions:
@@ -27,6 +31,8 @@ jobs:
           node scripts/arrival-browser-check.mjs
           node scripts/guest-browser-check.mjs
           node scripts/scout-browser-check.mjs
+          node scripts/nonselection-browser-check.mjs
+          node scripts/day-j-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
