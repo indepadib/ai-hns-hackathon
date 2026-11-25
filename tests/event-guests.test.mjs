@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {guestAction,guestToken,guestMail,validateGuest} from '../lib/event-guests.mjs';
+import {guestAction,guestToken,guestMail,validateGuest,guestQrPayload,guestQrId,scanGuestPass} from '../lib/event-guests.mjs';
 function fixture(guestPlan,guestContacts){
  const records=new Map();let sequence=0,sends=0;
  const db={list:async({prefix})=>({blobs:[...records.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key}))}),get:async k=>structuredClone(records.get(k)?.data??null),getWithMetadata:async k=>structuredClone(records.get(k)??null),setJSON:async(k,data,opts={})=>{const old=records.get(k);if(opts.onlyIfNew&&old||opts.onlyIfMatch&&opts.onlyIfMatch!==old?.etag)return{modified:false};const etag=String(++sequence);records.set(k,{data:structuredClone(data),etag});return{modified:true,etag}}};
  const secret='S'.repeat(40),now=()=>new Date('2026-11-24T19:00:00Z');
  const call=(action,body={},auth={role:'admin'},enabled=true,deliver=async()=>({id:'mock-'+ ++sends}))=>guestAction({action,body,auth,db,secret,canSend:enabled,deliver,guestPlan,guestContacts,now});
- return{call,secret,sends:()=>sends}
+ return{call,db,secret,sends:()=>sends}
 }
 test('Guest workflow is separate, explicit, concurrent-safe and supports private RSVP',async()=>{
  const {call,secret,sends}=fixture(),guest={name:'Synthetic Speaker',email:'speaker@example.invalid',role:'keynote',session:'AI in retail',slot:'10:30'};
@@ -99,3 +99,5 @@ test('Original six-column private speaker roster retains role, slot and sector w
  const s=rows.find(x=>x.name==='Synthetic Speaker');assert.equal(s.role,'business');assert.equal(s.slot,'11:15');assert.equal(s.vertical,'chari');assert.equal(s.email,'speaker@example.invalid');
  assert.equal(rows.find(x=>x.name==='Synthetic Mentor').vertical,'group');assert.equal(rows.find(x=>x.name==='Legacy').vertical,'life');assert.equal(sends(),0);
 });
+
+test('Guest QR is distinct, only issued after RSVP and scans only on event day with authorized staff',async()=>{const {call,db,secret,sends}=fixture();const created=await call('guest-create',{guest:{name:'Synthetic QR Guest',email:'qr@example.invalid',role:'mentor'}});const {id,version}=created.value.guest,token=guestToken(id,secret),code=guestQrPayload(id,secret),now=()=>new Date('2026-11-28T10:00:00+01:00'),scan=(c=code,auth={role:'rh'},clock=now)=>scanGuestPass({db,secret,code:c,auth,now:clock});assert.equal(guestQrId(code,secret),id);assert.equal(guestQrId(code.replace('HNSG:','HNS2:'),secret),null);assert.equal((await scan()).status,409);await call('guest-send',{id,version,confirm:true});assert.equal((await call('guest-rsvp-read',{token},null)).value.guest.passCode,undefined);assert.equal((await scan()).status,409);const confirmed=await call('guest-rsvp',{token,response:'confirmed'},null);assert.equal(confirmed.value.guest.passCode,code);assert.equal((await scan(code,{role:'participant'})).status,403);assert.equal((await scan(code,{role:'rh'},()=>new Date('2026-11-27T10:00:00+01:00'))).status,409);assert.equal((await scan(code.slice(0,-1)+(code.endsWith('0')?'1':'0'))).status,400);const pair=await Promise.all([scan(),scan()]);assert.ok(pair.every(x=>x.status===200));assert.equal(pair.filter(x=>x.value.alreadyPresent).length,1);assert.equal(pair[0].value.guestPresent,1);assert.equal(pair[0].value.kind,'guest');assert.equal((await call('guest-rsvp-read',{token},null)).value.guest.passCode,undefined);assert.equal(sends(),1);});

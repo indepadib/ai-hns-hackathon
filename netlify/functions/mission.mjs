@@ -1,4 +1,4 @@
-import {guestAction} from '../../lib/event-guests.mjs';
+import {guestAction,scanGuestPass,guestArrivalCount} from '../../lib/event-guests.mjs';
 import {finalResults} from '../../lib/final-results.mjs';
 import QRCode from 'qrcode';
 import {marker as restoreMarker} from '../../lib/restore-confirmed.mjs';
@@ -176,6 +176,7 @@ export default async function handler(request,context){
    if(!isLive(request,context))return fail('Espace invités réservé au site officiel',403);
    const enabled=auth?.role==='admin'&&['guest-list','guest-send'].includes(action)&&canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
    const out=await guestAction({action,body,auth,db,secret,canSend:enabled,guestPlan:auth?.role==='admin'?readEnv('HNS_EVENT_GUEST_PLAN'):undefined,guestContacts:auth?.role==='admin'?readEnv('HNS_EVENT_GUEST_CONTACTS'):undefined,deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
+   if(out.status===200&&out.value.guest?.passCode&&['guest-rsvp-read','guest-rsvp','guest-materials'].includes(action)){out.value.guest.qrCode=await QRCode.toDataURL(out.value.guest.passCode,{errorCorrectionLevel:'M',margin:4,width:320})}
    return json(out.value,out.status);
   }
   if(!auth)return fail('Session absente ou expirée',401,'NOT_AUTHENTICATED');
@@ -298,7 +299,7 @@ export default async function handler(request,context){
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
-   return json({participants:await listParticipants(db),sendEnabled:canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt)});
+   return json({participants:await listParticipants(db),guestPresent:isLive(request,context)?await guestArrivalCount(db):0,sendEnabled:canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt)});
   }
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
@@ -397,6 +398,7 @@ export default async function handler(request,context){
   if(action==='scan-invitation'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
    const code=within(body.code,80).toUpperCase();
+   if(code.startsWith('HNSG:')){if(!isLive(request,context))return fail('Pass invité réservé au site officiel',403);const out=await scanGuestPass({db,secret,code,auth});return json(out.value,out.status)}
    const signedId=qrId(code,secret),legacy=/^[A-F0-9]{24}$/.test(code);
    if(!signedId&&!legacy)return fail('QR invalide');
    const id=signedId||hash(code).slice(0,32),key=participantKey(id);
