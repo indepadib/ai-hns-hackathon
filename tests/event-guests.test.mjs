@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {guestAction,guestToken,guestMail,validateGuest} from '../lib/event-guests.mjs';
-function fixture(){
+function fixture(guestPlan,guestContacts){
  const records=new Map();let sequence=0,sends=0;
  const db={list:async({prefix})=>({blobs:[...records.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key}))}),get:async k=>structuredClone(records.get(k)?.data??null),getWithMetadata:async k=>structuredClone(records.get(k)??null),setJSON:async(k,data,opts={})=>{const old=records.get(k);if(opts.onlyIfNew&&old||opts.onlyIfMatch&&opts.onlyIfMatch!==old?.etag)return{modified:false};const etag=String(++sequence);records.set(k,{data:structuredClone(data),etag});return{modified:true,etag}}};
  const secret='S'.repeat(40),now=()=>new Date('2026-11-24T19:00:00Z');
- const call=(action,body={},auth={role:'admin'},enabled=true,deliver=async()=>({id:'mock-'+ ++sends}))=>guestAction({action,body,auth,db,secret,canSend:enabled,deliver,now});
+ const call=(action,body={},auth={role:'admin'},enabled=true,deliver=async()=>({id:'mock-'+ ++sends}))=>guestAction({action,body,auth,db,secret,canSend:enabled,deliver,guestPlan,guestContacts,now});
  return{call,secret,sends:()=>sends}
 }
 test('Guest workflow is separate, explicit, concurrent-safe and supports private RSVP',async()=>{
@@ -40,7 +40,7 @@ test('Guest email escapes content and validates slot and role',()=>{
  assert.throws(()=>validateGuest({...g,slot:'25:00'}));assert.throws(()=>validateGuest({...g,role:'admin'}));
 });
 
-test('Business Talk invitations carry the six-vertical brief and only invited speakers can submit presentation links',async()=>{
+test('Business Talk invitations carry the seven-vertical brief and only invited speakers can submit presentation links',async()=>{
  const {call,secret}=fixture();
  const fields={name:'Synthetic BU representative',email:'bu@example.invalid',role:'business',vertical:'retail',session:'Nos enjeux métiers',slot:'10:50'};
  assert.throws(()=>validateGuest({...fields,vertical:''}));
@@ -55,4 +55,36 @@ test('Business Talk invitations carry the six-vertical brief and only invited sp
  assert.equal((await call('guest-materials',{token,materials},null)).status,200);
  const row=(await call('guest-list')).value.guests[0];assert.equal(row.materials.link,materials.link);assert.equal(row.vertical,'retail');assert.equal(row.rsvp,'pending');
  const read=await call('guest-rsvp-read',{token},null);assert.equal(read.value.guest.brief.items.length,4);assert.equal(read.value.guest.canShareMaterials,true);assert.equal(read.value.guest.materials.title,materials.title);
+});
+
+test('Private roster import is explicit, admin-only, idempotent and does not send invitations',async()=>{
+ const {call,sends}=fixture(JSON.stringify({guests:[{name:'Synthetic Missing Email',role:'guest'},{name:'Synthetic Fintech Speaker',role:'business',vertical:'fintech',email:'fintech@example.invalid'}]}));
+ assert.equal((await call('guest-import-plan',{confirm:true},{role:'rh'})).status,403);
+ assert.equal((await call('guest-import-plan',{confirm:false})).status,409);
+ assert.equal((await call('guest-list')).value.planCount,2);
+ assert.equal((await call('guest-import-plan',{confirm:true})).value.created,2);
+ assert.equal((await call('guest-import-plan',{confirm:true})).value.skipped,2);
+ const row=(await call('guest-list')).value.guests.find(r=>!r.email);
+ assert.equal((await call('guest-send',{id:row.id,version:row.version,confirm:true})).status,409);
+ const updated=await call('guest-update',{id:row.id,version:row.version,guest:{...row,email:'missing@example.invalid'}});
+ assert.equal(updated.value.guest.email,'missing@example.invalid');assert.equal(sends(),0);
+ assert.equal((await call('guest-send',{id:row.id,version:updated.value.guest.version,confirm:true})).status,200);
+ assert.equal(sends(),1);
+});
+test('Legacy industry maps to consolidated Dislog DMD and group and fintech are supported',()=>{
+ const g={name:'Synthetic',role:'business',email:'s@example.invalid'};
+ assert.equal(validateGuest({...g,vertical:'industry'}).vertical,'life');
+ assert.equal(validateGuest({...g,vertical:'group'}).vertical,'group');
+ assert.equal(validateGuest({...g,vertical:'fintech'}).vertical,'fintech');
+});
+
+test('Private contact data supplements existing roles without choosing an ambiguous address',async()=>{
+ const {call,sends}=fixture(JSON.stringify({guests:[{name:'Synthetic Speaker',role:'business',vertical:'fintech'}]}),JSON.stringify({guests:[{name:'Synthetic Speaker',emailOptions:['one@example.invalid','two@example.invalid']},{name:'Synthetic Mentor',email:'mentor@example.invalid'}]}));
+ assert.equal((await call('guest-import-plan',{confirm:true})).value.created,2);
+ const rows=(await call('guest-list')).value.guests;
+ const speaker=rows.find(r=>r.name==='Synthetic Speaker');
+ assert.equal(speaker.role,'business');assert.equal(speaker.email,'');assert.equal(speaker.emailOptions.length,2);
+ assert.equal((await call('guest-send',{id:speaker.id,version:speaker.version,confirm:true})).status,409);
+ assert.equal(rows.find(r=>r.name==='Synthetic Mentor').email,'mentor@example.invalid');
+ assert.equal(sends(),0);
 });
