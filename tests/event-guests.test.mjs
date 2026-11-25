@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {guestAction,guestToken,guestMail,validateGuest} from '../lib/event-guests.mjs';
-function fixture(guestPlan){
+function fixture(guestPlan,guestContacts){
  const records=new Map();let sequence=0,sends=0;
  const db={list:async({prefix})=>({blobs:[...records.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key}))}),get:async k=>structuredClone(records.get(k)?.data??null),getWithMetadata:async k=>structuredClone(records.get(k)??null),setJSON:async(k,data,opts={})=>{const old=records.get(k);if(opts.onlyIfNew&&old||opts.onlyIfMatch&&opts.onlyIfMatch!==old?.etag)return{modified:false};const etag=String(++sequence);records.set(k,{data:structuredClone(data),etag});return{modified:true,etag}}};
  const secret='S'.repeat(40),now=()=>new Date('2026-11-24T19:00:00Z');
- const call=(action,body={},auth={role:'admin'},enabled=true,deliver=async()=>({id:'mock-'+ ++sends}))=>guestAction({action,body,auth,db,secret,canSend:enabled,deliver,guestPlan,now});
+ const call=(action,body={},auth={role:'admin'},enabled=true,deliver=async()=>({id:'mock-'+ ++sends}))=>guestAction({action,body,auth,db,secret,canSend:enabled,deliver,guestPlan,guestContacts,now});
  return{call,secret,sends:()=>sends}
 }
 test('Guest workflow is separate, explicit, concurrent-safe and supports private RSVP',async()=>{
@@ -76,4 +76,15 @@ test('Legacy industry maps to consolidated Dislog DMD and group and fintech are 
  assert.equal(validateGuest({...g,vertical:'industry'}).vertical,'life');
  assert.equal(validateGuest({...g,vertical:'group'}).vertical,'group');
  assert.equal(validateGuest({...g,vertical:'fintech'}).vertical,'fintech');
+});
+
+test('Private contact data supplements existing roles without choosing an ambiguous address',async()=>{
+ const {call,sends}=fixture(JSON.stringify({guests:[{name:'Synthetic Speaker',role:'business',vertical:'fintech'}]}),JSON.stringify({guests:[{name:'Synthetic Speaker',emailOptions:['one@example.invalid','two@example.invalid']},{name:'Synthetic Mentor',email:'mentor@example.invalid'}]}));
+ assert.equal((await call('guest-import-plan',{confirm:true})).value.created,2);
+ const rows=(await call('guest-list')).value.guests;
+ const speaker=rows.find(r=>r.name==='Synthetic Speaker');
+ assert.equal(speaker.role,'business');assert.equal(speaker.email,'');assert.equal(speaker.emailOptions.length,2);
+ assert.equal((await call('guest-send',{id:speaker.id,version:speaker.version,confirm:true})).status,409);
+ assert.equal(rows.find(r=>r.name==='Synthetic Mentor').email,'mentor@example.invalid');
+ assert.equal(sends(),0);
 });
