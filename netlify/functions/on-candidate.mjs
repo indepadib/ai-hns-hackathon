@@ -1,7 +1,7 @@
 import {getStore} from '@netlify/blobs';
-import {clean,validateEmail,candidateId,receiptTemplate,sendMail,ready,openStoreOptions} from './_utils.mjs';
-import {dataFromSubmission} from './triage.mjs';
-import {normalizeCV,candidateHasCV} from './_cv.mjs';
+import {clean,validateEmail,candidateId,receiptTemplate,sendMail,ready,openStoreOptions} from '../../lib/recruitment/_utils.mjs';
+import {dataFromSubmission} from '../../lib/recruitment/triage.mjs';
+import {normalizeCV,candidateHasCV} from '../../lib/recruitment/_cv.mjs';
 // Verified platform event; the website's public form cannot write directly to the private RH store.
 export default {
  async formSubmitted(event){

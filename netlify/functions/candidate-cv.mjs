@@ -1,6 +1,6 @@
 import {getStore} from '@netlify/blobs';
-import {secureTokenEqual,env,openStoreOptions} from './_utils.mjs';
-import {normalizeCV,safeNextLink} from './_cv.mjs';
+import {secureTokenEqual,env,openStoreOptions} from '../../lib/recruitment/_utils.mjs';
+import {normalizeCV,safeNextLink} from '../../lib/recruitment/_cv.mjs';
 
 const SITE_FORM_ID='6af0f91202bfb9a6322bb546'; // Existing H&S Netlify Forms ID
 const err=(message,status=400)=>new Response(JSON.stringify({error:message}),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});

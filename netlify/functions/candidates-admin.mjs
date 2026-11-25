@@ -1,7 +1,7 @@
 import {getStore} from '@netlify/blobs';
-import {secureTokenEqual,env,openStoreOptions,ready,candidateId,clean,validateEmail} from './_utils.mjs';
-import {triage,dataFromSubmission,statusValues} from './triage.mjs';
-import {normalizeCV,candidateHasCV,safeCandidateSummary} from './_cv.mjs';
+import {secureTokenEqual,env,openStoreOptions,ready,candidateId,clean,validateEmail} from '../../lib/recruitment/_utils.mjs';
+import {triage,dataFromSubmission,statusValues} from '../../lib/recruitment/triage.mjs';
+import {normalizeCV,candidateHasCV,safeCandidateSummary} from '../../lib/recruitment/_cv.mjs';
 const response=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
 const allowedActions=new Set(['set-status','note','invite','import']);
 function auth(request){
