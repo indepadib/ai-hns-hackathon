@@ -38,6 +38,7 @@ jobs:
           node scripts/retail-game-browser-check.mjs
           node scripts/business-games-browser-check.mjs
           node scripts/operations-games-browser-check.mjs
+          node scripts/tycoon-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
