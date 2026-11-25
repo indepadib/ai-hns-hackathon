@@ -62,3 +62,5 @@
     Cache-Control = "private, no-store"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
     X-Robots-Tag = "noindex, nofollow"
+
+# Redeploy production to apply rotated staff access credentials (2026-11-25).
