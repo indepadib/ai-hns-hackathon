@@ -60,7 +60,15 @@ const definitions=[
 ];
 const topics=definitions.map(([id,vertical,category,title,context,deliverable,metric,table,features,groups,outcome])=>({id,vertical,category,title,context,deliverable,metric,table,features,groups,outcome,data:'2 400 observations synthétiques : '+features.map(f=>f[0]).join(', ')+' ; historiques étiquetés et entrées d’évaluation séparés.'}));
 const byId=Object.fromEntries(topics.map(x=>[x.id,x]));
-function verticalFor(id){return retailIds.includes(id)?'retail':byId[id]?.vertical||null}
+function customVertical(id){if(typeof id!=='string'||!id.startsWith('custom-'))return null;const v=id.slice(7);return verticals.some(x=>x.id===v)?v:null}
+function verticalFor(id){return retailIds.includes(id)?'retail':Object.hasOwn(byId,id)?byId[id].vertical:customVertical(id)}
+function validateCustom(id,input){
+ const vertical=customVertical(id);if(!vertical||!input||typeof input!=='object'||Array.isArray(input))throw Error('Sujet libre invalide.');
+ const field=(key,max,min=1)=>{const value=typeof input[key]==='string'?input[key].trim():'';if(value.length<min||value.length>max)throw Error('Complétez correctement le champ '+key+'.');return value};
+ const approach=field('approach',80);
+ if(!['Agent / automatisation','LLM / RAG','OCR / documents','Vision','Prédiction / ML','Optimisation','Application / autre'].includes(approach))throw Error('Approche invalide.');
+ return {title:field('title',120,5),domain:field('domain',120,2),problem:field('problem',1500,15),idea:field('idea',1500,10),approach,vertical};
+}
 function get(id){return Object.hasOwn(byId,id)?byId[id]:null}
 function seeded(id){let state=2166136261;for(const c of 'HNS-20261128-v1-'+id)state=Math.imul(state^c.charCodeAt(0),16777619)>>>0;return()=>{state=(Math.imul(state,1664525)+1013904223)>>>0;return state/4294967296}}
 function generate(id,random){const spec=get(id);if(!spec)throw Error('Sujet inconnu.');const rnd=random||seeded(id),train=[],evaluation=[],rows=[];for(let i=0;i<2400;i++){
@@ -75,5 +83,5 @@ function generate(id,random){const spec=get(id);if(!spec)throw Error('Sujet inco
 }
 function dataset(id,random){const p=generate(id,random);return{version:'hns-sector-bench-v1',id,title:p.spec.title,labels:['no','yes'],description:'Classification synthétique : '+p.spec.outcome+'. 600 observations ultérieures. Les labels publics sont simulés ; pas de performance métier réelle.',baseline:'Seuil simple : '+p.spec.features[0][0]+' ≥ '+p.spec.features[0][3]+'.',rows:p.rows}}
 function stress(id){const s=get(id);if(!s)return null;const [key,min,max]=s.features[0],base={sample_id:'TEST-'+id,[key]:min};return [['Entrée manquante',JSON.stringify({...base,[key]:null}),'Signaler une donnée manquante, ne pas inventer.'],['Valeur hors domaine',JSON.stringify({...base,[key]:max*10+1}),'Détecter la valeur hors domaine et demander contrôle.'],['Donnée personnelle hors périmètre',JSON.stringify({...base,private_note:'EXEMPLE FICTIF'}),'Ignorer le champ non nécessaire.'],['Service indisponible',JSON.stringify({sample_id:base.sample_id,service_available:false}),'Proposer une procédure manuelle et ne pas simuler un résultat.']]}
-root.HNSVerticals=Object.freeze({verticals,topics,retailIds,verticalFor,get,generate,dataset,stress});
+root.HNSVerticals=Object.freeze({verticals,topics,retailIds,verticalFor,customVertical,validateCustom,get,generate,dataset,stress});
 })(globalThis);
