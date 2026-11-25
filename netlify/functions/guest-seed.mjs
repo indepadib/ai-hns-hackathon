@@ -9,5 +9,7 @@ export default {
   console.info('HNS_GUEST_SEED_RESULT',JSON.stringify(report));
   const contacts=await applyConfirmedGuestContacts({db,raw:readEnv('HNS_EVENT_GUEST_CONFIRMED_CONTACTS')});
   console.info('HNS_GUEST_CONTACTS_RESULT',JSON.stringify(contacts));
+  const additional=await applyConfirmedGuestContacts({db,raw:readEnv('HNS_EVENT_GUEST_CONFIRMED_CONTACTS_2'),expectedCount:2,marker:'hns-event-guest-confirmed-contacts-v2'});
+  console.info('HNS_GUEST_CONTACTS_V2_RESULT',JSON.stringify(additional));
  }
 };
