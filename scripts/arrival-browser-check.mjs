@@ -71,6 +71,18 @@ try{
   await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-participant');sessionStorage.setItem('hns_mission_role','participant')});
   await page.goto(base+'/mission-control/');
   await page.locator('.flight-plan').waitFor();
+  // Exercise the actual participant pages, not only the public discovery screen.
+  assert.equal(await page.locator('.day-j-card').isVisible(),true);
+  async function openMission(id){
+   if(viewport.width<=800&&!(await page.locator('[data-mission="'+id+'"]').isVisible()))await page.locator('#mobile-mission-toggle').click();
+   await page.locator('[data-mission="'+id+'"]').click();
+  }
+  await openMission('checkin');await page.getByRole('heading',{name:'Votre accueil, sans temps perdu'}).waitFor();
+  await page.locator('.day-j-card input[type="checkbox"]').first().check();assert.match(await page.locator('.day-j-card .dayj-tile').first().innerText(),/1 \/ 6/);
+  await openMission('briefing');await page.getByRole('heading',{name:'Briefing : les règles du jeu'}).waitFor();assert.equal(await page.locator('.day-j-card input[type="checkbox"]').count(),6);
+  await page.getByRole('button',{name:'Un problème précis et un utilisateur',exact:true}).click();assert.match(await page.locator('.day-j-card .dayj-feedback').innerText(),/Bonne réponse/);
+  await page.locator('#mission-home').click();
+  console.log('Participant checkin and briefing verified:',viewport.width,'px');
   assert.match(await page.locator('.flight-total strong').innerText(),/0\/6/);
   assert.equal(await page.locator('.welcome-next strong').innerText(),'challenge');
   await page.locator('#home-resume').click();
