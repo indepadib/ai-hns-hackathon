@@ -64,3 +64,12 @@
     X-Robots-Tag = "noindex, nofollow"
 
 # Redeploy production to apply rotated staff access credentials (2026-11-25).
+
+[[headers]]
+  for = "/scout/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Referrer-Policy = "no-referrer"
+    Cache-Control = "private, no-store"
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=()"
+    X-Robots-Tag = "noindex, nofollow"
