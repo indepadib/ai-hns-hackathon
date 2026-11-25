@@ -1,9 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {execFileSync} from 'node:child_process';
 import '../public/mission-control/verticals.js';import '../public/mission-control/retail-data.js';import '../public/mission-control/benchmark.js';import '../public/mission-control/starter-kit.js';import {privateDataset,inputPayload,evaluatePrivate} from '../lib/private-benchmark.mjs';
 const V=globalThis.HNSVerticals,B=globalThis.HNSBenchmark,S=globalThis.HNSStarterKit,R=globalThis.HNSRetailData;
-test('Six verticals and 19 unique proposed subjects; each new subject has distinct schema and reproducible temporal split',()=>{
- assert.equal(V.verticals.length,6);assert.equal(V.topics.length+V.retailIds.length,19);assert.equal(new Set(V.topics.map(t=>t.table)).size,15);
- for(const v of V.verticals)assert.equal(v.id==='retail'?V.retailIds.length:V.topics.filter(t=>t.vertical===v.id).length,v.id==='retail'?4:3);
+test('Seven verticals and 56 unique proposed subjects; each new subject has distinct schema and reproducible temporal split',()=>{
+ assert.equal(V.verticals.length,7);assert.equal(V.topics.length+V.retailIds.length,56);assert.equal(new Set(V.topics.map(t=>t.table)).size,52);
+ for(const v of V.verticals)assert.equal((v.id==='retail'?V.retailIds.length:0)+V.topics.filter(t=>t.vertical===v.id).length,8);
  for(const t of V.topics){
   const p=V.generate(t.id),q=V.generate(t.id),names=Object.keys(p.tables),train=p.tables[names[0]],evalRows=p.tables[names[1]];
   assert.equal(V.verticalFor(t.id),t.vertical);assert.equal(train.length,1800);assert.equal(evalRows.length,600);assert.ok(train.at(-1).observation_date<evalRows[0].observation_date);

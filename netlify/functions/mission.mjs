@@ -175,7 +175,7 @@ export default async function handler(request,context){
   if(['guest-list','guest-create','guest-update','guest-preview','guest-send','guest-revoke','guest-checkin','guest-rsvp-read','guest-rsvp','guest-materials'].includes(action)){
    if(!isLive(request,context))return fail('Espace invités réservé au site officiel',403);
    const enabled=auth?.role==='admin'&&['guest-list','guest-send'].includes(action)&&canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
-   const out=await guestAction({action,body,auth,db,secret,canSend:enabled,deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
+   const out=await guestAction({action,body,auth,db,secret,canSend:enabled,guestPlan:action==='guest-list'&&auth?.role==='admin'&&isLive(request,context)?readEnv('HNS_EVENT_GUEST_PLAN'):'',deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
    return json(out.value,out.status);
   }
   if(!auth)return fail('Session absente ou expirée',401,'NOT_AUTHENTICATED');
@@ -545,7 +545,7 @@ export default async function handler(request,context){
    if(!Number.isInteger(body.version)||body.version!==(dossier.version||0))return fail('Dossier modifié dans une autre session : rechargez avant de sauvegarder',409,'VERSION_CONFLICT');
    const allowed=['problem','solution','tasks','tests','decisions','redteam','audit','submission','challenge'];
    const stageFor={problem:'problem',solution:'solution',tasks:'build',tests:'build',decisions:'build',redteam:'redteam',audit:'redteam',submission:'pitch',challenge:'challenge'};const clean={...dossier.workspace};for(const k of allowed)if(w[k]!==undefined&&isOpen(stageFor[k]))clean[k]=w[k];
-   if(clean.challenge){const id=clean.challenge.id,vertical=globalThis.HNSVerticals.verticalFor(id);if(!vertical)return fail('Sujet de challenge invalide',400,'CHALLENGE_INVALID');if(clean.challenge.vertical&&clean.challenge.vertical!==vertical)return fail('Sujet incompatible avec la verticale',400,'CHALLENGE_INVALID');clean.challenge={...clean.challenge,id,vertical};}
+   if(clean.challenge){const id=clean.challenge.id,vertical=globalThis.HNSVerticals.verticalFor(id);if(!vertical)return fail('Sujet de challenge invalide',400,'CHALLENGE_INVALID');if(clean.challenge.vertical&&clean.challenge.vertical!==vertical&&!(clean.challenge.vertical==='industry'&&vertical==='life'&&['line-failure','quality-defect','yield-loss'].includes(id)))return fail('Sujet incompatible avec la verticale',400,'CHALLENGE_INVALID');if(globalThis.HNSVerticals.customVertical(id)){try{clean.challenge={id,vertical,custom:globalThis.HNSVerticals.validateCustom(id,clean.challenge.custom)}}catch(err){return fail(err.message,400,'CUSTOM_CHALLENGE_INVALID')}}else clean.challenge={id,vertical};}
    if(clean.tests?.benchmark){const b=clean.tests.benchmark;if(!b.report||b.report.challenge!==clean.challenge?.id){delete clean.tests.benchmark}else if(typeof b.signature!=='string'||!equal(b.signature,benchmarkSignature(b.report,dossierKey,secret)))return fail('Rapport de benchmark non authentifié. Relancez l’évaluation.',400,'BENCHMARK_INVALID');}
    if(JSON.stringify(clean).length>120000)return fail('Dossier trop volumineux',413);
    dossier.workspace=clean;dossier.version=(dossier.version||0)+1;dossier.updatedAt=new Date().toISOString();dossier.lastSave=requestId?{id:requestId,actor:auth.id,baseVersion:body.version,fingerprint}:null;
