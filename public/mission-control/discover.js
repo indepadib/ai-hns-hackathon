@@ -1,0 +1,1 @@
+'use strict';globalThis.HNSDayJ.mount(document.getElementById('dayj-content'),'discover');
