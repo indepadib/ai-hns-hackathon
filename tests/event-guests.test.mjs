@@ -75,7 +75,7 @@ test('Legacy industry maps to consolidated Dislog DMD and group and fintech are 
  const g={name:'Synthetic',role:'business',email:'s@example.invalid'};
  assert.equal(validateGuest({...g,vertical:'industry'}).vertical,'life');
  assert.equal(validateGuest({...g,vertical:'group'}).vertical,'group');
- assert.equal(validateGuest({...g,vertical:'fintech'}).vertical,'fintech');
+ assert.equal(validateGuest({...g,vertical:'fintech'}).vertical,'chari');
 });
 
 test('Private contact data supplements existing roles without choosing an ambiguous address',async()=>{
@@ -87,4 +87,15 @@ test('Private contact data supplements existing roles without choosing an ambigu
  assert.equal((await call('guest-send',{id:speaker.id,version:speaker.version,confirm:true})).status,409);
  assert.equal(rows.find(r=>r.name==='Synthetic Mentor').email,'mentor@example.invalid');
  assert.equal(sends(),0);
+});
+
+test('Original six-column private speaker roster retains role, slot and sector when contacts are merged',async()=>{
+ const plan={roster:[['Synthetic Speaker','chari','Fintech','business','11:15','Business talk'],['Synthetic Mentor','','IT','mentor','','Support'],['Legacy','industry','Industry','mentor','','Test'],['Invalid','unknown','Demo','business','','Test']]};
+ const contacts={guests:[{name:'Synthetic Speaker',email:'speaker@example.invalid'}]};
+ const {call,sends}=fixture(JSON.stringify(plan),JSON.stringify(contacts));
+ assert.equal((await call('guest-list')).value.planCount,3);
+ assert.equal((await call('guest-import-plan',{confirm:true})).value.created,3);
+ const rows=(await call('guest-list')).value.guests;
+ const s=rows.find(x=>x.name==='Synthetic Speaker');assert.equal(s.role,'business');assert.equal(s.slot,'11:15');assert.equal(s.vertical,'chari');assert.equal(s.email,'speaker@example.invalid');
+ assert.equal(rows.find(x=>x.name==='Synthetic Mentor').vertical,'group');assert.equal(rows.find(x=>x.name==='Legacy').vertical,'life');assert.equal(sends(),0);
 });

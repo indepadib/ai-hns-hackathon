@@ -1,7 +1,7 @@
 (function(root){
 'use strict';
 const roles={keynote:'Keynote speaker',business:'Représentant de verticale · Business Talk',workshop:'Animateur d’atelier',mentor:'Mentor',jury:'Membre du jury',leadership:'Direction H&S',guest:'Invité interne',organizer:'Organisation'};
-const verticals={retail:'One Retail',logistics:'La Voie Express / BLS',life:'Dislog / DMD (industrie incluse)',property:'GIDNA / Kaya',media:'WB Group',fintech:'Chari Fintech',group:'H&S Groupe · IT, RH et fonctions transverses'};
+const verticals={property:'GIDNA / Kaya',media:'WB Group',retail:'One Retail',life:'Dislog / DMD',logistics:'La Voie Express / BLS',chari:'Chari Fintech',group:'H&S Groupe'};
 const mailLabels={draft:'À inviter',sending:'En cours',accepted:'Acceptée par la messagerie',review_required:'À vérifier'};
 const rsvpLabels={pending:'Réponse attendue',confirmed:'Confirmé',declined:'Décliné'};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
