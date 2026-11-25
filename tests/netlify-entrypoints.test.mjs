@@ -1,0 +1,2 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readdirSync,readFileSync} from 'node:fs';
+test('Only actual Netlify handlers are registered as functions',()=>{const dir=new URL('../netlify/functions/',import.meta.url);const files=readdirSync(dir).filter(f=>/\.mjs$/.test(f));assert.deepEqual(files.sort(),['candidate-cv.mjs','candidates-admin.mjs','gmail-callback.mjs','mission.mjs','on-candidate.mjs','restore-confirmed.mjs']);for(const file of files)assert.match(readFileSync(new URL(file,dir),'utf8'),/export default/);});

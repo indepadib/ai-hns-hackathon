@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import {strict as assert} from 'node:assert';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {pathToFileURL} from 'node:url';
-import {normalizeCV,candidateHasCV,safeCandidateSummary,safeNextLink} from '../netlify/functions/_cv.mjs';
+import {normalizeCV,candidateHasCV,safeCandidateSummary,safeNextLink} from '../lib/recruitment/_cv.mjs';
 const hosted='https://d33wubrfki0l68.cloudfront.net/test-recruitment-uploads/cv.pdf';
 
 test('PDF upload metadata is validated',()=>{
@@ -24,9 +24,9 @@ test('Netlify API pagination link is constrained to the original host and endpoi
 });
 // Test candidate-cv via a temporary dependency-free server substitute for @netlify/blobs.
 const dir=fs.mkdtempSync(path.join(os.tmpdir(),'hns-cv-test-'));
-for(const name of ['_utils.mjs','_cv.mjs'])fs.copyFileSync(path.resolve('netlify/functions',name),path.join(dir,name));
+for(const name of ['_utils.mjs','_cv.mjs'])fs.copyFileSync(path.resolve('lib/recruitment',name),path.join(dir,name));
 fs.writeFileSync(path.join(dir,'fakeblobs.mjs'),`export const data=new Map();export function getStore(){return {get:async id=>data.get(id)||null,getMetadata:async()=>({etag:'version-1'}),setJSON:async()=>({modified:true})}}`);
-fs.writeFileSync(path.join(dir,'candidate-cv.mjs'),fs.readFileSync(path.resolve('netlify/functions/candidate-cv.mjs'),'utf8').replace("from '@netlify/blobs'","from './fakeblobs.mjs'"));
+fs.writeFileSync(path.join(dir,'candidate-cv.mjs'),fs.readFileSync(path.resolve('netlify/functions/candidate-cv.mjs'),'utf8').replace("from '@netlify/blobs'","from './fakeblobs.mjs'").replaceAll("../../lib/recruitment/","./"));
 const {default:rawCVHandler,findCVForEmail}=await import(pathToFileURL(path.join(dir,'candidate-cv.mjs')));
 const liveContext={site:{id:'33dae2ce-086d-4470-b6fe-248f3ca49b70'},deploy:{context:'production'}};
 const cvHandler=(req,context=liveContext)=>rawCVHandler(req,context);
