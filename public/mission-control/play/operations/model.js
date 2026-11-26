@@ -21,6 +21,10 @@ function pick(s,id,qty){if(s.done)return s;const b=bins.find(x=>x.id===id);if(!b
  if(bins.some(x=>x.sku===b.sku&&x.expiry<b.expiry&&s.stock[x.id]>0))return reject('FEFO : un lot plus ancien est encore disponible. Prenez-le en priorité.');
  return{...s,position:{r:b.r,c:b.c},stock:{...s.stock,[id]:s.stock[id]-qty},picked:{...s.picked,[b.sku]:(s.picked[b.sku]||0)+qty},travel:s.travel+distance(s.position,b),history:[...s.history,{type:'pick',id,qty,message:b.name+' · '+qty+' unité(s) · lot '+b.lot}]}
 }
+function walk(s,r,c){if(s.done||!Number.isInteger(r)||!Number.isInteger(c)||r<0||r>4||c<0||c>4||distance(s.position,{r,c})!==1)return s;return{...s,position:{r,c},travel:s.travel+1}}
+function route(from,to){if(!Number.isInteger(to.r)||!Number.isInteger(to.c)||to.r<0||to.r>4||to.c<0||to.c>4)return[];const steps=[];let {r,c}=from;while(c!==to.c){c+=Math.sign(to.c-c);steps.push({r,c})}while(r!==to.r){r+=Math.sign(to.r-r);steps.push({r,c})}return steps}
+function pickHere(s,id,q){const b=bins.find(x=>x.id===id);return b&&distance(s.position,b)===0?pick(s,id,q):s}
+function dispatchHere(s){return distance(s.position,depot)===0?dispatch(s):s}
 function canDispatch(s){return !s.done&&orders[s.order].lines.every(([sku])=>remaining(s,sku)===0)}
 function dispatch(s){if(!canDispatch(s))return s;return{...s,order:s.order+1,position:{...depot},picked:{},travel:s.travel+distance(s.position,depot),history:[...s.history,{type:'dispatch',message:orders[s.order].id+' expédiée et stock mis à jour.'}],done:s.order+1===orders.length}}
 function optimalWarehouse(){let best=Infinity;const visit=s=>{if(s.done){best=Math.min(best,s.travel);return}if(s.travel>=best)return;if(canDispatch(s)){visit(dispatch(s));return}for(const b of bins){const q=Math.min(remaining(s,b.sku),s.stock[b.id]);if(!q)continue;const n=pick(s,b.id,q);if(n.errors===s.errors)visit(n)}};visit(warehouse());return best}
@@ -51,5 +55,5 @@ function cashStep(s,staff){if(s.done||!Number.isInteger(staff)||staff<1||staff>m
 function allowed(s,staff){return !s.done&&Number.isInteger(staff)&&staff>=1&&staff<=maxStaff&&!s.lanes.slice(staff).some(Boolean)&&s.spend+staff*cashierCost+(slots.length-s.round-1)*cashierCost<=budget}
 function cashSummary(s){const busy=s.lanes.filter(Boolean).length,started=s.served+busy;return{served:s.served,abandoned:s.abandoned,waiting:s.queue.length,busy,arrived:s.arrived,wait:started?s.wait/started:0,spend:s.spend,contribution:s.served*marginPerCustomer-s.spend}}
 function bestCash(){let best=null;const walk=s=>{if(s.done){const t=cashSummary(s);if(!best||t.contribution>best.summary.contribution||t.contribution===best.summary.contribution&&t.wait<best.summary.wait)best={state:s,summary:t};return}for(let i=1;i<=3;i++)if(allowed(s,i))walk(cashStep(s,i))};walk(cashier());return best}
-root.OperationsGames=Object.freeze({depot,bins,orders,distance,warehouse,remaining,pick,canDispatch,dispatch,optimalWarehouse,slots,cashier,cashStep,allowed,cashSummary,bestCash,cashierCost,marginPerCustomer,budget,patience});
+root.OperationsGames=Object.freeze({depot,bins,orders,distance,warehouse,remaining,pick,walk,route,pickHere,dispatchHere,canDispatch,dispatch,optimalWarehouse,slots,cashier,cashStep,allowed,cashSummary,bestCash,cashierCost,marginPerCustomer,budget,patience});
 })(globalThis);
