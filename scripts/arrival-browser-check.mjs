@@ -107,6 +107,15 @@ try{
   await page.locator('.starter-kit summary').click();
   assert.match(await page.locator('.starter-source').innerText(),/def predict\(row\):/);
   const layout=await page.evaluate(()=>({viewport:innerWidth,scrollWidth:document.documentElement.scrollWidth,overflow:[...document.querySelectorAll('main *')].filter(e=>e.getBoundingClientRect().right>innerWidth+1&&e.getBoundingClientRect().width>0&&!e.closest('.lab-table,.starter-source,.explore-tables,.demo-track')).slice(0,12).map(e=>({tag:e.tagName,cls:String(e.className).slice(0,100),right:Math.round(e.getBoundingClientRect().right)}))}));console.log('Participant layout',JSON.stringify(layout));assert.ok(layout.scrollWidth<=layout.viewport+1,'Participant horizontal overflow: '+JSON.stringify(layout));
+  if(viewport.width===390){
+   const boardFit=await page.locator('.build-workbench').evaluate(el=>{
+    const board=el.querySelector('.build-kanban'),tabs=el.querySelector('.build-tabs'),list=el.querySelector('.build-list');
+    return {boardWidth:board.getBoundingClientRect().width,listWidth:list.clientWidth,tabsWidth:tabs.clientWidth,tabsScroll:tabs.scrollWidth,columns:[...board.children].map(x=>({right:x.getBoundingClientRect().right,left:x.getBoundingClientRect().left})),left:list.getBoundingClientRect().left,right:list.getBoundingClientRect().right};
+   });
+   assert.ok(boardFit.boardWidth<=boardFit.listWidth+1,'Kanban width '+JSON.stringify(boardFit));
+   assert.ok(boardFit.tabsScroll<=boardFit.tabsWidth+1,'Build tabs overflow '+JSON.stringify(boardFit));
+   assert.ok(boardFit.columns.every(x=>x.left>=boardFit.left-1&&x.right<=boardFit.right+1),'Kanban columns overflow '+JSON.stringify(boardFit));
+  }
   assert.deepEqual(errors,[]);
   await page.screenshot({path:'browser-review/starter-'+viewport.width+'.png',fullPage:true});
   await page.locator('#mission-home').click();await page.locator('.flight-grid [data-home-mission="challenge"]').click();await page.locator('[data-vertical="logistics"]').click();assert.equal(await page.locator('[data-challenge="availability"]').count(),0);assert.equal(await page.locator('[data-challenge]').count(),8);page.once('dialog',d=>d.accept());await page.locator('[data-challenge="delivery-risk"]').click();await page.locator('#mission-home').click();await page.locator('.flight-grid [data-home-mission="build"]').click();await page.locator('#starter-code').waitFor();assert.match(await page.locator('.data-hero').innerText(),/La Voie Express/i);assert.equal(await page.locator('[data-explore-table="shipments_train"]').count(),1);assert.equal(await page.locator('[data-explore-table="inventory_daily"]').count(),0);const sectorDownload=page.waitForEvent('download');await page.locator('#starter-input').click();assert.equal((await sectorDownload).suggestedFilename(),'hns-delivery-risk-evaluation-inputs.csv');assert.deepEqual(errors,[]);await page.screenshot({path:'browser-review/sector-'+viewport.width+'.png',fullPage:true});console.log('Sector challenge and isolated Data Lab verified:',viewport.width,'px');
