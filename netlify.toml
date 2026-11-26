@@ -13,6 +13,11 @@
   to = "/.netlify/functions/mission"
   status = 200
 
+[[redirects]]
+  from = "/favicon.ico"
+  to = "/assets/hns-group-favicon.png"
+  status = 302
+
 [[headers]]
   for = "/*"
   [headers.values]
