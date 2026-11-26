@@ -167,3 +167,16 @@ body:has(.staff-workspace,.jury-workspace) .hero>p:last-child{display:none}
 .challenge-studio .challenge-tile>p{min-height:0}
 .challenge-studio .challenge-tile.chosen{box-shadow:0 0 0 1px #185bcc}
 @media(max-width:450px){.market-search>div{gap:6px}.market-search .button{padding:10px 12px}.market-selection{padding:12px}.challenge-studio .challenge-art{height:54px}}
+
+/* Learning: direct step access and a concrete output, not another scoring system. */
+.learn-step-nav{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.learn-step-nav button{display:grid;gap:5px;align-content:start;text-align:left;min-height:64px;padding:10px;border:1px solid #d3dfec;border-radius:9px;background:#fff;color:#173d66;font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.learn-step-nav button small{font-size:10px;font-weight:750;color:#526580}
+.learn-step-nav button[aria-pressed=true]{background:#e9f2ff;border-color:#8aade0;color:#123b76}
+.learn-step-nav button:focus-visible{outline:3px solid #185bcc;outline-offset:2px}
+.learn-output{display:grid;gap:7px;padding:13px 14px;margin-top:12px;background:white;border:1px solid #c5d7ec;border-radius:9px;overflow-wrap:anywhere}
+.learn-output small{font-size:10px;font-weight:800;letter-spacing:.06em;color:#43628a}
+.learn-output strong{font-size:14px;line-height:1.5;color:#173d66}
+.learning-guide .learn-note{font-size:12px;color:#526580;margin:0}
+.learning-guide .tools>.button{min-height:44px}
+@media(max-width:450px){.learn-step-nav{grid-template-columns:minmax(0,1fr);gap:6px}.learn-step-nav button{display:flex;align-items:center;gap:10px;min-height:44px}.learning-guide #learn-slide{padding:14px}}
