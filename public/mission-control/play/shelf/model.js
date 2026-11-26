@@ -10,5 +10,6 @@ function place(s,id,x,y){if(!canPlace(s,id,x,y))return s;const p={...s.placement
 function remove(s,id){if(!s.placements[id])return s;const p={...s.placements};delete p[id];return{...s,placements:p}}
 function adjacent(s,a,b){const x=s.placements[a],y=s.placements[b];if(!x||!y)return false;return cells(by(a),x.x,x.y).some(([i,j])=>cells(by(b),y.x,y.y).some(([k,l])=>Math.abs(i-k)+Math.abs(j-l)===1))}
 function score(s){const l=scenarios[s.level];let margin=0,cost=0,occupied=0;for(const [id,q] of Object.entries(s.placements)){const p=by(id);cost+=p.cost;occupied+=p.width;margin+=Math.round(p.base*l.weights[q.y])}const bonuses=l.bonuses.filter(([a,b])=>adjacent(s,a,b));margin+=bonuses.reduce((n,b)=>n+b[2],0);const missing=l.required.filter(id=>!s.placements[id]);return{margin,cost,occupied,bonuses,missing,passed:!missing.length&&margin>=l.target&&cost<=l.budget}}
-root.ShelfSprint=Object.freeze({W,H,products,scenarios,by,cells,create,canPlace,place,remove,adjacent,score});
+function restore(x){if(!x||!Number.isInteger(x.level)||!scenarios[x.level]||!x.placements||typeof x.placements!=='object'||Array.isArray(x.placements))throw Error('Invalid shelf checkpoint');let s=create(x.level);for(const [id,p] of Object.entries(x.placements)){if(!p||!Number.isInteger(p.x)||!Number.isInteger(p.y))throw Error('Invalid placement');const n=place(s,id,p.x,p.y);if(n===s)throw Error('Invalid placement');s=n}return s}
+root.ShelfSprint=Object.freeze({W,H,products,scenarios,by,cells,create,canPlace,place,remove,adjacent,score,restore});
 })(globalThis);
