@@ -1,6 +1,7 @@
 import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import {mkdir} from 'node:fs/promises';
+import {guestMail} from '../lib/event-guests.mjs';
 const browser=await chromium.launch({headless:true});const base='http://127.0.0.1:8765';
 await mkdir('browser-review',{recursive:true});
 try{
@@ -18,7 +19,7 @@ try{
     case 'team-dashboard':out={teams:[]};break;
     case 'guest-list':out={guests,sendEnabled:true};break;
     case 'guest-create':guests.push({id,...body.guest,version:0,mailStatus:'draft',rsvp:'pending'});out={guest:guests[0]};status=201;break;
-    case 'guest-preview':out={guest:guests[0],mail:{subject:'Invitation H&S — Atelier',text:'Bonjour '+guests[0].name+' — '+guests[0].slot+'\n'+base+'/invites/#'+inviteToken}};break;
+    case 'guest-preview':out={guest:guests[0],mail:guestMail(guests[0],'S'.repeat(40))};break;
     case 'guest-send':assert.equal(body.confirm,true);sends++;guests[0].mailStatus='accepted';guests[0].version++;out={guest:guests[0]};break;
     case 'guest-materials':case 'guest-rsvp-read':case 'guest-rsvp':
       assert.equal(body.token,inviteToken);
@@ -42,7 +43,22 @@ try{
   await page.locator('#guests-open').click();await page.locator('#guests-new').click();
   const form=page.locator('.guest-form');await form.locator('[name=name]').fill('Intervenant fictif');await form.locator('[name=email]').fill('speaker@example.invalid');await form.locator('[name=role]').selectOption('business');await form.locator('[name=vertical]').selectOption('retail');await form.locator('[name=department]').fill('One Retail');await form.locator('[name=session]').fill('IA et opérations');await form.locator('[name=slot]').fill('13:30');
   await form.locator('button[type=submit]').click();await page.locator('[data-guest-preview]').click();await page.locator('#guest-send').waitFor();assert.equal(sends,0);
-  page.once('dialog',d=>d.accept());await page.locator('#guest-send').click();
+  const mailFrame=page.frameLocator('#guest-mail-frame');
+  await mailFrame.getByText('Bonjour Intervenant fictif,',{exact:true}).waitFor();
+  assert.equal(await mailFrame.getByRole('link',{name:'Répondre à mon invitation'}).getAttribute('href'),'#');
+  assert.match(await mailFrame.locator('body').innerText(),/Programme indicatif/);
+  assert.match(await mailFrame.locator('body').innerText(),/Votre créneau : 13:30/);
+  await page.locator('#guest-close').click();
+  await page.locator('#guest-select-visible').click();await page.locator('#guest-batch-review').click();
+  assert.match(await page.locator('#guest-batch-panel').innerText(),/speaker@example.invalid/);assert.equal(sends,0);
+  await page.locator('#guest-batch-cancel').click();assert.equal(sends,0);
+  if(viewport.width===390){
+   await page.locator('[data-guest-preview]').click();await page.locator('#guest-send').waitFor();
+   page.once('dialog',d=>d.accept());await page.locator('#guest-send').click();
+  }else{
+   await page.locator('#guest-batch-review').click();
+   page.once('dialog',d=>d.accept());await page.locator('#guest-batch-send').click();
+  }
   await page.locator('.guest-state').getByText('Réponse attendue',{exact:true}).waitFor();assert.equal(sends,1);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest center overflow');
   await page.screenshot({path:'browser-review/guest-center-'+viewport.width+'.png',fullPage:true});
