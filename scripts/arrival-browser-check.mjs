@@ -118,13 +118,22 @@ try{
   assert.match(await page.locator('#custom-status').innerText(),/Sujet libre sélectionné/);
   await page.locator('#mission-home').click();assert.match(await page.locator('.home-status').innerText(),/Assistant RH fictif/);
   await page.locator('.flight-grid [data-home-mission="build"]').click();assert.match(await page.locator('.data-hero').innerText(),/propres exemples/);assert.match(await page.locator('.studio-orientation').innerText(),/Build Sprint/);
-  await page.locator('#learn-next').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);assert.deepEqual(errors,[]);
+  await page.locator('#learn-next').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);
+  assert.equal(await page.locator('.learn-step-nav button').count(),3);
+  await page.locator('[data-learn-step="2"]').click();
+  assert.match(await page.locator('#learn-position').innerText(),/3 \/ 3/);
+  assert.equal(await page.locator('[data-learn-step="2"]').getAttribute('aria-current'),'step');
+  assert.match(await page.locator('#learn-slide .learn-output').innerText(),/commande ou un lien vérifié/);
+  await page.locator('#learn-prev').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);
+  await page.locator('[data-learn-step="0"]').click();assert.equal(await page.locator('#learn-prev').isDisabled(),true);
+  assert.deepEqual(errors,[]);
 
   await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
  }
  for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
   const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[];
   page.on('pageerror',err=>errors.push(err.message));
+  let releaseScore;const scoreGate=new Promise(resolve=>{releaseScore=resolve});
   const rows=[{id:'a'.repeat(32),alias:'Projet fictif Alpha',submittedAt:'2026-11-28T16:00:00Z',score:null},{id:'b'.repeat(32),alias:'Projet fictif Beta',submittedAt:'2026-11-28T16:01:00Z',score:null}];
   const workspace={challenge:{id:'availability'},problem:{summary:'Synthetic problem'},solution:{summary:'Synthetic solution'},submission:{result:'Synthetic demo'}};
   await page.route('**/api/mission',async route=>{
@@ -134,7 +143,7 @@ try{
     case 'me':out={role:'jury'};break;
     case 'jury-list':out={participants:rows};break;
     case 'jury-dossier':out={...rows.find(x=>x.id===body.id),workspace};break;
-    case 'jury-score':{const row=rows.find(x=>x.id===body.id);assert.equal(body.expectedScoredAt,null);row.score={scores:body.scores,total:79.5,scoredAt:new Date().toISOString()};out={score:row.score};break}
+    case 'jury-score':{await scoreGate;const row=rows.find(x=>x.id===body.id);assert.equal(body.expectedScoredAt,null);row.score={scores:body.scores,total:79.5,scoredAt:new Date().toISOString()};out={score:row.score};break}
     default:status=400;out={error:'Unexpected jury request '+body.action};
    }}
    await route.fulfill({status,json:out});
@@ -143,9 +152,16 @@ try{
   await page.goto(base+'/mission-control/');
   await page.locator('[data-dossier]').first().click();
   await page.locator('#scoring').waitFor();
+  assert.equal(await page.locator('#jury-filter-count').innerText(),'2 / 2 dossiers');
+  assert.equal(await page.locator('[data-dossier]').first().getAttribute('aria-current'),'true');
+  assert.match(await page.locator('#jury-completion').innerText(),/0 \/ 5/);
   for(const [k,v] of Object.entries({problem:80,design:70,build:90,test:60,demo:100}))await page.locator('#score-'+k).fill(String(v));
   assert.equal(await page.locator('#jury-total').innerText(),'79.5/100');
+  assert.match(await page.locator('#jury-completion').innerText(),/5 \/ 5/);
   await page.locator('#scoring button[value="next"]').click();
+  await page.locator('#score-problem:disabled').waitFor();
+  assert.equal(await page.locator('#scoring input:disabled').count(),5);
+  releaseScore();
   await page.locator('.jury-dossier-heading h2').filter({hasText:'Projet fictif Beta'}).waitFor();
   assert.equal(rows[0].score.total,79.5);assert.equal(rows[1].score,null);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Jury overflow');
