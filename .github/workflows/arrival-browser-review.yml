@@ -46,6 +46,7 @@ jobs:
           node scripts/crisis-browser-check.mjs
           node scripts/fresh-browser-check.mjs
           node scripts/checkout-browser-check.mjs
+          node scripts/shelf-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
