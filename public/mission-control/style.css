@@ -148,3 +148,22 @@ body:has(.staff-workspace,.jury-workspace) .hero>p:last-child{display:none}
 }
 @media(max-width:350px){.event-quick-links{grid-template-columns:minmax(0,1fr)}}
 @media(prefers-reduced-motion:reduce){.event-quick-link{transition:none}}
+
+/* Marketplace: a clear choice, searchable briefs and compact cards. */
+.market-selection{display:grid;gap:5px;border:1px solid #d5e2f1;background:#f2f7fd;border-radius:12px;padding:14px 16px;margin:14px 0 18px;overflow-wrap:anywhere}
+.market-selection small{font-size:10px;font-weight:750;letter-spacing:.09em;color:#43628a}
+.market-selection strong{font-size:17px;color:#173d66}
+.market-selection span{font-size:12px;color:#526580;line-height:1.5}
+.market-search{display:grid;gap:6px;margin:12px 0 16px}
+.market-search label{font-size:13px;font-weight:650;color:#173d66}
+.market-search>div{display:flex;gap:8px;align-items:center}
+.market-search input{flex:1;min-width:0;width:100%;min-height:44px;padding:10px 12px;border:1px solid #cbd7e8;border-radius:9px;background:#fff;color:#10223c}
+.market-search p{font-size:12px;margin:0;color:#526580}
+.challenge-grid .challenge-tile[hidden]{display:none}
+.challenge-studio .challenge-art{height:65px;padding:12px 16px}
+.challenge-studio .challenge-art svg{width:32px;height:32px}
+.challenge-studio .challenge-art .challenge-number{font-size:23px}
+.challenge-studio .challenge-tile>h3{font-size:19px;line-height:1.3}
+.challenge-studio .challenge-tile>p{min-height:0}
+.challenge-studio .challenge-tile.chosen{box-shadow:0 0 0 1px #185bcc}
+@media(max-width:450px){.market-search>div{gap:6px}.market-search .button{padding:10px 12px}.market-selection{padding:12px}.challenge-studio .challenge-art{height:54px}}
