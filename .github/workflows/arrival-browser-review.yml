@@ -42,6 +42,7 @@ jobs:
           node scripts/tycoon-campaign-browser-check.mjs
           node scripts/rush-browser-check.mjs
           node scripts/career-browser-check.mjs
+          node scripts/retail-city-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
