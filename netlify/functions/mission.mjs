@@ -143,7 +143,7 @@ export default async function handler(request,context){
    }
    return json({results});
   }
-  if(['rh-nonselection-status','rh-nonselection-preview','rh-nonselection-send'].includes(action)){
+  if(['rh-nonselection-status','rh-nonselection-preview','rh-nonselection-send','rh-nonselection-bulk-preview','rh-nonselection-bulk-mark'].includes(action)){
    if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès recrutement non autorisé',403);
    const enabled=canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
    const operations=async candidateId=>{const code=createHmac('sha256',secret).update('invitation-v1:'+candidateId).digest('hex').slice(0,24).toUpperCase(),id=hash(code).slice(0,32);const [pass,invitation]=await Promise.all([db.get(participantKey(id),{type:'json'}),db.get('invitation-mail-'+id,{type:'json'})]);return{pass,invitation}};

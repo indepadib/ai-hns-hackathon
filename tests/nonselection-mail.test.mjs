@@ -20,3 +20,25 @@ test('Unknown provider result cannot be retried and status remains non-retained'
  const f=fixture();assert.equal((await f.call('rh-nonselection-send',{confirm:true},true,async()=>{throw Error('timeout')})).status,503);assert.equal(f.row().nonselection.state,'review_required');assert.equal(f.row().status,'rejected');assert.equal((await f.call('rh-nonselection-send',{confirm:true})).status,409);
  assert.ok(!nonselectionMail({name:'<script>'}).html.includes('<script>'));
 });
+
+test('Bulk nonselection protects selected, invited, confirmed, existing passes and stale decisions; marks only outstanding dossiers without sending',async()=>{
+ for(const status of ['received','review','interview']){
+  const f=fixture({status,email:'candidate@example.invalid',name:'Fictif',notes:[{text:'Conserver'}]});
+  const items=[{id:f.id,status}];
+  assert.equal((await f.call('rh-nonselection-bulk-preview',{items})).value.results[0].state,'eligible');
+  assert.equal(f.row().status,status);
+  assert.equal((await f.call('rh-nonselection-bulk-mark',{items})).status,403);
+  assert.equal((await f.call('rh-nonselection-bulk-mark',{items,confirm:true})).value.results[0].state,'marked');
+  assert.equal(f.row().status,'rejected');assert.equal(f.row().notes[0].text,'Conserver');assert.equal(f.sends(),0);
+  assert.equal((await f.call('rh-nonselection-bulk-mark',{items,confirm:true})).value.results[0].state,'protected');
+ }
+ for(const status of ['selected','invited','confirmed','rejected']){
+  const f=fixture({status,email:'candidate@example.invalid'});
+  assert.equal((await f.call('rh-nonselection-bulk-mark',{items:[{id:f.id,status:'received'}],confirm:true})).value.results[0].state,'protected');
+  assert.equal(f.row().status,status);assert.equal(f.sends(),0);
+ }
+ for(const ops of [{pass:{status:'invited'},invitation:null},{pass:null,invitation:{state:'accepted'}}]){
+  const f=fixture({status:'interview',email:'candidate@example.invalid'},ops);
+  assert.equal((await f.call('rh-nonselection-bulk-mark',{items:[{id:f.id,status:'interview'}],confirm:true})).value.results[0].state,'protected');assert.equal(f.row().status,'interview');
+ }
+});
