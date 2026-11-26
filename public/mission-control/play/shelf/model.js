@@ -1,0 +1,14 @@
+(function(root){'use strict';
+const W=5,H=3;
+const products=[{id:'milk',name:'Lait',width:2,cost:24,base:14,color:'#83b5d0',type:'fresh'},{id:'cereal',name:'Céréales',width:2,cost:32,base:20,color:'#d7a86b',type:'dry'},{id:'juice',name:'Jus',width:1,cost:18,base:11,color:'#e1a278',type:'fresh'},{id:'biscuit',name:'Biscuits',width:1,cost:14,base:9,color:'#ba87ac',type:'dry'},{id:'coffee',name:'Café',width:2,cost:44,base:28,color:'#a28a70',type:'dry'},{id:'tea',name:'Thé',width:1,cost:20,base:13,color:'#8ab99b',type:'dry'},{id:'water',name:'Eau',width:2,cost:16,base:8,color:'#87bec2',type:'fresh'},{id:'yogurt',name:'Yaourts',width:1,cost:22,base:16,color:'#d8a3ba',type:'fresh'}];
+const scenarios=[{name:'Petit-déjeuner',budget:145,target:115,required:['milk','cereal'],bonuses:[['milk','cereal',12],['coffee','biscuit',10]],weights:[1,1.35,.8],blocked:[[0,2],[4,2]]},{name:'Heure du goûter',budget:135,target:105,required:['juice','biscuit'],bonuses:[['juice','biscuit',15],['tea','biscuit',10]],weights:[.9,1.45,.7],blocked:[[0,0],[4,1]]},{name:'Week-end premium',budget:155,target:120,required:['coffee','tea'],bonuses:[['coffee','biscuit',15],['milk','cereal',12]],weights:[1.1,1.5,.65],blocked:[[2,0],[2,2]]}];
+const by=id=>products.find(p=>p.id===id);
+function create(level=0){if(!scenarios[level])throw Error('unknown scenario');return{level,placements:{}}}
+function cells(p,x,y){return Array.from({length:p.width},(_,i)=>[x+i,y])}
+function canPlace(s,id,x,y){const p=by(id),l=scenarios[s.level];if(!p||!Number.isInteger(x)||!Number.isInteger(y)||x<0||y<0||x+p.width>W||y>=H)return false;const points=cells(p,x,y);return points.every(([a,b])=>!l.blocked.some(([i,j])=>a===i&&b===j)&&!Object.entries(s.placements).some(([other,q])=>other!==id&&cells(by(other),q.x,q.y).some(([i,j])=>i===a&&j===b)))}
+function place(s,id,x,y){if(!canPlace(s,id,x,y))return s;const p={...s.placements,[id]:{x,y}};if(Object.keys(p).reduce((n,k)=>n+by(k).cost,0)>scenarios[s.level].budget)return s;return{...s,placements:p}}
+function remove(s,id){if(!s.placements[id])return s;const p={...s.placements};delete p[id];return{...s,placements:p}}
+function adjacent(s,a,b){const x=s.placements[a],y=s.placements[b];if(!x||!y)return false;return cells(by(a),x.x,x.y).some(([i,j])=>cells(by(b),y.x,y.y).some(([k,l])=>Math.abs(i-k)+Math.abs(j-l)===1))}
+function score(s){const l=scenarios[s.level];let margin=0,cost=0,occupied=0;for(const [id,q] of Object.entries(s.placements)){const p=by(id);cost+=p.cost;occupied+=p.width;margin+=Math.round(p.base*l.weights[q.y])}const bonuses=l.bonuses.filter(([a,b])=>adjacent(s,a,b));margin+=bonuses.reduce((n,b)=>n+b[2],0);const missing=l.required.filter(id=>!s.placements[id]);return{margin,cost,occupied,bonuses,missing,passed:!missing.length&&margin>=l.target&&cost<=l.budget}}
+root.ShelfSprint=Object.freeze({W,H,products,scenarios,by,cells,create,canPlace,place,remove,adjacent,score});
+})(globalThis);
