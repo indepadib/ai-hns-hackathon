@@ -118,7 +118,15 @@ try{
   assert.match(await page.locator('#custom-status').innerText(),/Sujet libre sélectionné/);
   await page.locator('#mission-home').click();assert.match(await page.locator('.home-status').innerText(),/Assistant RH fictif/);
   await page.locator('.flight-grid [data-home-mission="build"]').click();assert.match(await page.locator('.data-hero').innerText(),/propres exemples/);assert.match(await page.locator('.studio-orientation').innerText(),/Build Sprint/);
-  await page.locator('#learn-next').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);assert.deepEqual(errors,[]);
+  await page.locator('#learn-next').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);
+  assert.equal(await page.locator('.learn-step-nav button').count(),3);
+  await page.locator('[data-learn-step="2"]').click();
+  assert.match(await page.locator('#learn-position').innerText(),/3 \/ 3/);
+  assert.equal(await page.locator('[data-learn-step="2"]').getAttribute('aria-current'),'step');
+  assert.match(await page.locator('#learn-slide .learn-output').innerText(),/commande ou un lien vérifié/);
+  await page.locator('#learn-prev').click();assert.match(await page.locator('#learn-position').innerText(),/2 \/ 3/);
+  await page.locator('[data-learn-step="0"]').click();assert.equal(await page.locator('#learn-prev').isDisabled(),true);
+  assert.deepEqual(errors,[]);
 
   await context.close();console.log('Participant Flight Plan and Starter verified:',viewport.width,'px');
  }
