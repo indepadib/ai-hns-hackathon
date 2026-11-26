@@ -180,3 +180,15 @@ body:has(.staff-workspace,.jury-workspace) .hero>p:last-child{display:none}
 .learning-guide .learn-note{font-size:12px;color:#526580;margin:0}
 .learning-guide .tools>.button{min-height:44px}
 @media(max-width:450px){.learn-step-nav{grid-template-columns:minmax(0,1fr);gap:6px}.learn-step-nav button{display:flex;align-items:center;gap:10px;min-height:44px}.learning-guide #learn-slide{padding:14px}}
+
+/* Event-day mobile: keep all sprint statuses and tabs accessible without horizontal scrolling. */
+@media(max-width:650px){
+ .build-workbench .build-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible;gap:6px}
+ .build-workbench .build-tabs button{white-space:normal;overflow-wrap:anywhere;min-width:0}
+ .build-workbench .build-list{overflow:visible}
+ .build-workbench .build-kanban{grid-template-columns:minmax(0,1fr);min-width:0;width:100%}
+ .build-workbench .build-column{min-width:0;min-height:0;padding:10px}
+ .build-workbench .build-column h4{padding:4px 0}
+ .build-workbench .build-item{min-height:44px}
+ .build-workbench .build-empty{margin:0;padding:4px 0 6px}
+}
