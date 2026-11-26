@@ -48,6 +48,7 @@ jobs:
           node scripts/checkout-browser-check.mjs
           node scripts/shelf-browser-check.mjs
           node scripts/hub-browser-check.mjs
+          node scripts/play-shell-browser-check.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
