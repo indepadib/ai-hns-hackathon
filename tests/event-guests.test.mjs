@@ -101,3 +101,27 @@ test('Original six-column private speaker roster retains role, slot and sector w
 });
 
 test('Guest QR is distinct, only issued after RSVP and scans only on event day with authorized staff',async()=>{const {call,db,secret,sends}=fixture();const created=await call('guest-create',{guest:{name:'Synthetic QR Guest',email:'qr@example.invalid',role:'mentor'}});const {id,version}=created.value.guest,token=guestToken(id,secret),code=guestQrPayload(id,secret),now=()=>new Date('2026-11-28T10:00:00+01:00'),scan=(c=code,auth={role:'rh'},clock=now)=>scanGuestPass({db,secret,code:c,auth,now:clock});assert.equal(guestQrId(code,secret),id);assert.equal(guestQrId(code.replace('HNSG:','HNS2:'),secret),null);assert.equal((await scan()).status,409);await call('guest-send',{id,version,confirm:true});assert.equal((await call('guest-rsvp-read',{token},null)).value.guest.passCode,undefined);assert.equal((await scan()).status,409);const confirmed=await call('guest-rsvp',{token,response:'confirmed'},null);assert.equal(confirmed.value.guest.passCode,code);assert.equal((await scan(code,{role:'participant'})).status,403);assert.equal((await scan(code,{role:'rh'},()=>new Date('2026-11-27T10:00:00+01:00'))).status,409);assert.equal((await scan(code.slice(0,-1)+(code.endsWith('0')?'1':'0'))).status,400);const pair=await Promise.all([scan(),scan()]);assert.ok(pair.every(x=>x.status===200));assert.equal(pair.filter(x=>x.value.alreadyPresent).length,1);assert.equal(pair[0].value.guestPresent,1);assert.equal(pair[0].value.kind,'guest');assert.equal((await call('guest-rsvp-read',{token},null)).value.guest.passCode,undefined);assert.equal(sends(),1);});
+
+test('Premium guest mail is personalized, includes the published indicative agenda and a signed personal RSVP link',()=>{
+ const secret='S'.repeat(40),id='a'.repeat(32);
+ const row={id,name:'Invité <Test> & Associé',email:'test@example.invalid',role:'business',vertical:'retail',department:'Direction',session:'Atelier <stock>',slot:'11:20'};
+ const mail=guestMail(row,secret),url='https://ai.hns.ma/invites/#'+guestToken(id,secret);
+ assert.match(mail.subject,/One Retail/);
+ assert.ok(mail.text.includes(url));
+ assert.ok(mail.html.includes('href="'+url+'"'));
+ assert.ok(mail.html.includes('Invité &lt;Test&gt; &amp; Associé'));
+ assert.ok(!mail.html.includes('Atelier <stock>'));
+ assert.match(mail.html,/Répondre à mon invitation/);
+ assert.match(mail.html,/Votre créneau : 11:20/);
+ assert.match(mail.text,/10:00 — Accueil/);
+ assert.match(mail.text,/18:00 — Clôture/);
+ assert.match(mail.text,/Programme indicatif/);
+ assert.match(mail.html,/Préparation de votre intervention/);
+ assert.ok(mail.html.indexOf('Répondre à mon invitation')<mail.html.indexOf('Préparation de votre intervention'));
+ assert.ok(!mail.html.includes('HNSG:'));
+ const leadership=guestMail({...row,role:'leadership',slot:''},secret);
+ assert.match(leadership.html,/Découvrez les talents/);
+ assert.doesNotMatch(leadership.html,/Préparation de votre intervention/);
+ assert.doesNotMatch(leadership.html,/Votre créneau :/);
+ for(const content of [mail.text,mail.html,leadership.text,leadership.html])assert.doesNotMatch(content,/transmettez votre support|avant vendredi 27 novembre|Votre support<\/strong>/i);
+});

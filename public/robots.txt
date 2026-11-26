@@ -1,0 +1,3 @@
+# Indexing rules on protected pages remain defined by X-Robots-Tag.
+User-agent: *
+Disallow:

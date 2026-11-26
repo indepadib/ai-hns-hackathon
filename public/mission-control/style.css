@@ -192,3 +192,20 @@ body:has(.staff-workspace,.jury-workspace) .hero>p:last-child{display:none}
  .build-workbench .build-item{min-height:44px}
  .build-workbench .build-empty{margin:0;padding:4px 0 6px}
 }
+
+/* Guest campaign: preview the real email and review recipients before sending. */
+.guest-campaign{display:grid;gap:10px;margin:16px 0;padding:15px;border:1px solid #d3e1ef;border-radius:12px;background:#f4f8fd;min-width:0}
+.guest-campaign strong{font-size:16px;color:#173d66}
+.guest-campaign p{margin:5px 0 0}
+.guest-campaign .tools,#guest-batch-panel .tools{display:flex;gap:8px;flex-wrap:wrap}
+.guest-campaign .button,#guest-batch-panel .button{min-height:44px;white-space:normal}
+.guest-row input[data-guest-select]{width:18px;height:18px;flex:0 0 18px;accent-color:#245583;cursor:pointer}
+.guest-select-space{width:18px;flex:0 0 18px}
+#guest-batch-panel{padding:16px;margin:12px 0;background:white;border:1px solid #c4d6ea;border-radius:12px;overflow-wrap:anywhere}
+#guest-batch-panel[hidden]{display:none}
+#guest-batch-panel li{font-size:13px;line-height:1.6;padding:7px 0}
+#guest-batch-panel li small{color:#526580}
+#guest-mail-frame{display:block;width:100%;height:720px;border:1px solid #d6e4f1;border-radius:12px;background:#edf2f7}
+.guest-text-details{margin-top:12px;border:1px solid #d6e4f1;border-radius:9px;padding:12px}
+.guest-text-details summary{cursor:pointer;color:#173d66;font-size:13px;font-weight:650}
+@media(max-width:700px){.guest-campaign .tools>.button,#guest-batch-panel .tools>.button{flex:1 1 100%}.guest-row .guest-info{flex-basis:calc(100% - 90px)}#guest-mail-frame{height:650px}}

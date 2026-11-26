@@ -185,8 +185,22 @@ export default async function handler(request,context){
   }
   if(['guest-list','guest-import-plan','guest-create','guest-update','guest-preview','guest-send','guest-revoke','guest-checkin','guest-rsvp-read','guest-rsvp','guest-materials'].includes(action)){
    if(!isLive(request,context))return fail('Espace invités réservé au site officiel',403);
-   const enabled=auth?.role==='admin'&&['guest-list','guest-send'].includes(action)&&canSend(request,context)&&(readEnv('HNS_MAIL_PROVIDER')!=='gmail-oauth'||!!(await oauthStatus(db)).testedAt);
+   const guestAdmin=auth?.role==='admin'&&['guest-list','guest-send'].includes(action);
+   let sendBlocker='';
+   if(guestAdmin){
+    const provider=mailProvider();
+    if(!isLive(request,context))sendBlocker='Envoi réel réservé au site officiel.';
+    else if(readEnv('HNS_INVITATION_SEND_ENABLED')!=='true')sendBlocker='Envoi réel désactivé dans la configuration.';
+    else if(!provider)sendBlocker='Configuration de messagerie incomplète.';
+    else if(provider.provider==='gmail-oauth'){
+     const connection=await oauthStatus(db);
+     if(!connection.connected)sendBlocker='Connectez la boîte Gmail de recrutement depuis le back-office RH.';
+     else if(!connection.testedAt)sendBlocker='Test Gmail interne requis depuis le back-office RH.';
+    }
+   }
+   const enabled=guestAdmin&&!sendBlocker;
    const out=await guestAction({action,body,auth,db,secret,canSend:enabled,guestPlan:auth?.role==='admin'?readEnv('HNS_EVENT_GUEST_PLAN'):undefined,guestContacts:auth?.role==='admin'?readEnv('HNS_EVENT_GUEST_CONTACTS'):undefined,deliver:payload=>deliverInvitation(mailProvider(),payload,{db})});
+   if(guestAdmin&&action==='guest-list'&&out.status===200)out.value.sendBlocker=sendBlocker;
    if(out.status===200&&out.value.guest?.passCode&&['guest-rsvp-read','guest-rsvp','guest-materials'].includes(action)){out.value.guest.qrCode=await QRCode.toDataURL(out.value.guest.passCode,{errorCorrectionLevel:'M',margin:4,width:320})}
    return json(out.value,out.status);
   }
