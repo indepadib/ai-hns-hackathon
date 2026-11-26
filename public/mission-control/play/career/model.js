@@ -1,16 +1,20 @@
 (function(root){'use strict';
 const KEY='hns-career-v1',chapters=[{id:'rush',title:'Employé polyvalent',place:'Le premier magasin',url:'/mission-control/play/rush/',xp:100,description:'Réussissez le premier niveau de Retail Rush.'},{id:'store',title:'Responsable magasin',place:'Le week-end décisif',url:'/mission-control/play/retail/',xp:200,description:'Terminez les trois journées et obtenez une contribution positive.'},{id:'tycoon',title:'Directeur de réseau',place:'Votre empire retail',url:'/mission-control/play/tycoon/campaign/',xp:400,description:'Terminez les 12 semaines avec au moins 3 objectifs sur 5.'}];
+const side=[{id:'warehouse',title:'Logisticien',xp:60,description:'Préparer les deux commandes WMS.',url:'/mission-control/play/operations/#warehouse',symbol:'box'},{id:'lab',title:'Data Guardian',xp:60,description:'Terminer le parcours Data Rescue.',url:'/mission-control/play/flow/#data',symbol:'data'},{id:'cafe',title:'Anti-gaspi',xp:60,description:'Réussir le premier niveau Fresh Rescue.',url:'/mission-control/play/fresh/',symbol:'leaf'},{id:'checkout',title:'Pro des caisses',xp:60,description:'Réussir le premier rush Checkout Fever.',url:'/mission-control/play/checkout/',symbol:'cash'},{id:'shelf',title:'Merchandising Expert',xp:60,description:'Réussir un scénario Shelf Sprint.',url:'/mission-control/play/shelf/',symbol:'shelf'}];
 const rewards=[{id:'cap',name:'Casquette Gold',price:100,description:'Casquette dorée visible dans Retail Rush.'},{id:'apron',name:'Tablier Émeraude',price:150,description:'Tablier vert visible sur votre avatar Retail Rush.'},{id:'frame',name:'Cadre Prestige',price:250,description:'Cadre doré autour du plateau Retail Rush.'}];
-function empty(){return{version:1,completed:{},owned:[],active:[]}}
-function normalize(x){const s=empty();if(!x||x.version!==1)return s;for(const c of chapters){if(x.completed?.[c.id]===true)s.completed[c.id]=true}for(const r of rewards){if(x.owned?.includes?.(r.id)&&balance(s)>=r.price)s.owned.push(r.id)}s.active=s.owned.filter(id=>x.active?.includes?.(id));return s}
-function xp(s){return chapters.reduce((n,c)=>n+(s.completed[c.id]?c.xp:0),0)}
+function empty(){return{version:1,completed:{},side:{},owned:[],active:[]}}
+function normalize(x){const s=empty();if(!x||x.version!==1)return s;for(const c of chapters){if(x.completed?.[c.id]===true)s.completed[c.id]=true}for(const q of side){if(x.side?.[q.id]===true)s.side[q.id]=true}for(const r of rewards){if(x.owned?.includes?.(r.id)&&balance(s)>=r.price)s.owned.push(r.id)}s.active=s.owned.filter(id=>x.active?.includes?.(id));return s}
+function xp(s){return chapters.reduce((n,c)=>n+(s.completed[c.id]?c.xp:0),0)+side.reduce((n,q)=>n+(s.side?.[q.id]?q.xp:0),0)}
 function balance(s){return xp(s)-rewards.reduce((n,r)=>n+(s.owned.includes(r.id)?r.price:0),0)}
 function unlocked(s,id){const i=chapters.findIndex(c=>c.id===id);return i>=0&&chapters.slice(0,i).every(c=>s.completed[c.id])}
 function complete(s,id){if(!chapters.some(c=>c.id===id)||s.completed[id])return s;return {...s,completed:{...s.completed,[id]:true}}}
 function purchase(s,id){const r=rewards.find(x=>x.id===id);if(!r||s.owned.includes(id)||balance(s)<r.price)return s;return{...s,owned:[...s.owned,id],active:[...s.active,id]}}
 function toggle(s,id){if(!s.owned.includes(id))return s;return {...s,active:s.active.includes(id)?s.active.filter(x=>x!==id):[...s.active,id]}}
-function read(){try{return normalize(JSON.parse(root.localStorage.getItem(KEY)||'null'))}catch{return empty()}}
+function award(s,id){if(!side.some(q=>q.id===id)||s.side?.[id])return s;return {...s,side:{...s.side,[id]:true}}}
+function read(){try{let s=normalize(JSON.parse(root.localStorage.getItem(KEY)||'null'));const city=JSON.parse(root.localStorage.getItem('hns-retail-city-v1')||'null');if(city?.version===1&&Array.isArray(city.played))for(const id of city.played)if(['warehouse','lab','cafe'].includes(id))s=award(s,id);for(const [key,id] of [['hns-checkout-v1','checkout'],['hns-shelf-sprint-v1','shelf']]){try{const x=JSON.parse(root.localStorage.getItem(key)||'null');if(id==='checkout'&&Number(x?.unlocked)>=1)s=award(s,id);if(id==='shelf'&&[0,1,2].some(i=>x?.[i]===true))s=award(s,id)}catch{}}return s}catch{return empty()}}
 function write(s){try{root.localStorage.setItem(KEY,JSON.stringify(s));return true}catch{return false}}
 function record(id){const s=read(),n=complete(s,id);return {newly:n!==s,saved:write(n),state:n}}
-root.RetailCareer=Object.freeze({chapters,rewards,empty,normalize,xp,balance,unlocked,complete,purchase,toggle,read,write,record});
+function recordSide(id){const s=read(),n=award(s,id);return {newly:n!==s,saved:write(n),state:n}}
+function rank(s){let n=0;for(const c of chapters){if(!s.completed[c.id])break;n++}return ['Prêt à jouer','Employé confirmé','Responsable de magasin','Directeur de réseau'][n]}
+root.RetailCareer=Object.freeze({chapters,side,rewards,empty,normalize,xp,balance,unlocked,complete,purchase,toggle,read,write,record,award,recordSide,rank});
 })(globalThis);

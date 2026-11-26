@@ -15,7 +15,7 @@ function normalize(s){const n=empty();if(s?.version!==1)return n;if(walkable(s.p
 function visit(s,id){return by(id)&&!s.visited.includes(id)?{...s,visited:[...s.visited,id]}:s}
 function answer(s,id,choice){const p=by(id);return p?.question&&choice===p.answer&&!s.solved.includes(id)?{...s,solved:[...s.solved,id]}:s}
 function read(){try{return normalize(JSON.parse(root.localStorage.getItem(KEY)||'null'))}catch{return empty()}}
-function recordGame(id){if(!games[id])return false;const s=read();if(!s.played.includes(id))s.played.push(id);return write(s)}
+function recordGame(id){if(!games[id])return false;const s=read();if(!s.played.includes(id))s.played.push(id);const ok=write(s);root.RetailCareer?.recordSide(id);return ok}
 function write(s){try{root.localStorage.setItem(KEY,JSON.stringify(s));return true}catch{return false}}
 const ns='http://www.w3.org/2000/svg';
 function node(tag,attrs){const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);return e}
