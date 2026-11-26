@@ -23,7 +23,7 @@ function mount(container,api){
   selectionState();
  }
  async function refresh(){
-  if(busy)return;busy=true;say('Actualisation…');try{const data=await api('guest-list');if(!panel.isConnected)return;rows=data.guests||[];enabled=data.sendEnabled;loaded=true;q('guests-import').hidden=!data.planMissing;q('guests-import').textContent='Importer les fiches manquantes ('+Number(data.planMissing||0)+')';const report=data.importReport;q('guests-import-status').textContent=report?.state==='completed'?'Import initial vérifié : '+report.matched+' fiches sur '+report.expected+'. Aucun envoi automatique.':report?.state==='review_required'?'Import automatique à vérifier : '+(report.matched??report.planned??0)+' / '+report.expected+' fiches. Vérifiez les doublons, les noms et la liste privée.':data.planMissing?data.planMissing+' fiches de la liste privée restent à importer.':'Liste à jour.';draw();say(enabled?'Messagerie configurée. Aucun envoi sans confirmation.':data.sendBlocker||'Envois indisponibles : vérifiez la configuration Gmail.')}catch(e){say(e.message)}finally{busy=false}
+  if(busy)return;busy=true;say('Actualisation…');try{const data=await api('guest-list');if(!panel.isConnected)return;rows=data.guests||[];enabled=data.sendEnabled;loaded=true;q('guests-import').hidden=!data.planMissing;q('guests-import').textContent='Importer les fiches manquantes ('+Number(data.planMissing||0)+')';const report=data.importReport;q('guests-import-status').textContent=report?.state==='completed'?'Import initial vérifié : '+report.matched+' fiches sur '+report.expected+'. Aucun envoi automatique.':report?.state==='review_required'?'Import automatique à vérifier : '+(report.matched??report.planned??0)+' / '+report.expected+' fiches. Vérifiez les doublons, les noms et la liste privée.':data.planMissing?data.planMissing+' fiches de la liste privée restent à importer.':'Liste à jour.';draw();say(enabled?'Messagerie configurée. Aucun envoi sans confirmation.':data.sendBlocker||'Envois indisponibles : vérifiez la configuration Gmail.')}catch(e){say(e.message)}finally{busy=false;if(panel.isConnected)selectionState()}
  }
  function form(row=null){
   if(busy)return;preview.hidden=true;edit.hidden=false;
@@ -45,7 +45,7 @@ function mount(container,api){
    preview.scrollIntoView({block:'nearest',behavior:'smooth'});
   }catch(e){preview.textContent=e.message}finally{busy=false}
  }
- function selectionState(){q('guest-selection-count').textContent=selected.size+' invitation(s) sélectionnée(s) · seules les fiches avec email et en brouillon sont éligibles.';q('guest-batch-review').disabled=busy||!selected.size;q('guest-clear-selection').disabled=busy||!selected.size;q('guest-select-visible').disabled=busy||!visibleEligible.length;q('guest-batch-panel').hidden=true}
+ function selectionState(){q('guest-selection-count').textContent=selected.size+' invitation(s) sélectionnée(s) · seules les fiches avec email et en brouillon sont éligibles.';q('guest-batch-review').disabled=busy||!selected.size;q('guest-clear-selection').disabled=busy||!selected.size;q('guest-select-visible').disabled=busy||!visibleEligible.length;if(!busy)q('guest-batch-panel').hidden=true}
  q('guest-select-visible').onclick=()=>{if(busy)return;visibleEligible.forEach(r=>selected.add(r.id));draw()};
  q('guest-clear-selection').onclick=()=>{if(busy)return;selected.clear();draw()};
  q('guest-batch-review').onclick=()=>{
