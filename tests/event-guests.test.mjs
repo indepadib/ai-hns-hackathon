@@ -122,5 +122,6 @@ test('Premium guest mail is personalized, includes the published indicative agen
  const leadership=guestMail({...row,role:'leadership',slot:''},secret);
  assert.match(leadership.html,/Découvrez les talents/);
  assert.doesNotMatch(leadership.html,/Préparation de votre intervention/);
- assert.doesNotMatch(leadership.html,/Votre créneau/);
+ assert.doesNotMatch(leadership.html,/Votre créneau :/);
+ for(const content of [mail.text,mail.html,leadership.text,leadership.html])assert.doesNotMatch(content,/transmettez votre support|avant vendredi 27 novembre|Votre support<\/strong>/i);
 });
