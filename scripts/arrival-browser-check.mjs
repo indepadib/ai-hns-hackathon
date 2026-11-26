@@ -78,7 +78,7 @@ try{
    await page.locator('[data-mission="'+id+'"]').click();
   }
   await openMission('checkin');await page.getByRole('heading',{name:'Votre accueil, sans temps perdu'}).waitFor();
-  await page.locator('.day-j-card input[type="checkbox"]').first().check();assert.match(await page.locator('.day-j-card .dayj-tile').first().innerText(),/1 \/ 6/);
+  await page.locator('.day-j-card input[type="checkbox"]').first().check();assert.match(await page.locator('.day-j-card .dayj-tile').first().innerText(),/1 \/ 6/);const playLink=page.locator('.day-j-card a[href="/mission-control/play/"]');assert.equal(await playLink.getAttribute('target'),'_blank');const beforeVersion=version;const gamePromise=context.waitForEvent('page');await playLink.click();const game=await gamePromise;await game.waitForLoadState('domcontentloaded');await game.locator('.hub-hero').waitFor();assert.equal(await game.evaluate(()=>window.opener===null),true);assert.equal(await game.evaluate(()=>sessionStorage.getItem('hns_mission_token')),null);await game.close();assert.equal(await page.locator('.day-j-card input[type="checkbox"]').first().isChecked(),true);assert.equal(version,beforeVersion);
   await openMission('briefing');await page.getByRole('heading',{name:'Briefing : les règles du jeu'}).waitFor();assert.equal(await page.locator('.day-j-card input[type="checkbox"]').count(),6);
   await page.getByRole('button',{name:'Un problème précis et un utilisateur',exact:true}).click();assert.match(await page.locator('.day-j-card .dayj-feedback').innerText(),/Bonne réponse/);
   await page.locator('#mission-home').click();
