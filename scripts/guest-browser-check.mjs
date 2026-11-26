@@ -30,7 +30,16 @@ try{
    await route.fulfill({status,json:out});
   });
   await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
-  await page.goto(base+'/mission-control/');await page.locator('#guests-open').click();await page.locator('#guests-new').click();
+  await page.goto(base+'/mission-control/');
+  const shortcuts=page.getByRole('navigation',{name:'Raccourcis organisation'});await shortcuts.waitFor();
+  assert.equal(await shortcuts.getByRole('button').count(),5);
+  for(const [id,section] of [['arrivals','.staff-heading'],['teams','.talent-command'],['schedule','.admin-utility'],['results','.final-desk'],['guests','.guests-desk']]){
+   await shortcuts.locator('[data-event-jump="'+id+'"]').click();
+   assert.equal(await page.locator(section+' h2').first().evaluate(el=>document.activeElement===el),true,'Shortcut focus '+id);
+  }
+  assert.equal(sends,0);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Organizer navigation overflow');
+  await page.locator('#guests-open').click();await page.locator('#guests-new').click();
   const form=page.locator('.guest-form');await form.locator('[name=name]').fill('Intervenant fictif');await form.locator('[name=email]').fill('speaker@example.invalid');await form.locator('[name=role]').selectOption('business');await form.locator('[name=vertical]').selectOption('retail');await form.locator('[name=department]').fill('One Retail');await form.locator('[name=session]').fill('IA et opérations');await form.locator('[name=slot]').fill('13:30');
   await form.locator('button[type=submit]').click();await page.locator('[data-guest-preview]').click();await page.locator('#guest-send').waitFor();assert.equal(sends,0);
   page.once('dialog',d=>d.accept());await page.locator('#guest-send').click();
