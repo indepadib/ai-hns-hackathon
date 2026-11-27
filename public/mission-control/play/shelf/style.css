@@ -2,3 +2,15 @@
 .resume-notice{margin:8px 0;padding:9px 12px;border:1px solid #729e91;background:#315b54;color:#e5f3df;border-radius:9px;font-size:12px;font-weight:750}
 
 .touch-coach{display:flex;flex-direction:column;gap:2px;background:#31594f;border:1px solid #6d9e89;border-radius:9px;padding:8px;margin:6px 0 8px;color:#e6f3e1}.touch-coach b{font-size:13px}.touch-coach span{font-size:11px;color:#c9dfd2}.tray-host{margin:0 0 10px}.tray-host .tray{grid-template-columns:repeat(4,minmax(0,1fr))}.tray-host .product{min-height:60px;padding:5px;gap:4px;flex-wrap:wrap}.tray-host .product svg{width:24px;height:30px}.tray-host .product b{font-size:11px}.tray-host .product small{font-size:9px}.first-product{outline:2px solid #f0cd83;outline-offset:1px}.slot.valid{animation:available-slot .35s ease-out}.slot.valid:after{content:'✓';position:absolute;right:3px;top:2px;color:#38764f;font-size:10px}.slot.first-slot{border-color:#97ad96}.slot.filled{animation:placed .25s ease-out}@keyframes available-slot{from{filter:brightness(.85)}to{filter:brightness(1)}}@keyframes placed{from{transform:scale(.92)}to{transform:scale(1)}}@media(max-width:700px){.tray-host .product{flex-wrap:nowrap;min-height:65px;padding:3px;gap:1px}.tray-host .product small{font-size:8px}.tray-host .product svg{width:20px;height:25px}.tray-host{margin-bottom:7px}.touch-coach{padding:6px}.touch-coach b{font-size:12px}.touch-coach span{font-size:10px}}
+
+/* Keep catalog and shelf in one playing area on narrow screens. */
+.actions{flex-wrap:wrap}.actions .primary{flex:1 1 100%;min-height:44px}
+@media(max-width:640px){
+ .tray-host .tray{display:flex;overflow-x:auto;scroll-snap-type:x proximity;gap:5px;padding:2px 2px 5px}
+ .tray-host .product{flex:0 0 112px;min-height:65px;scroll-snap-align:start;white-space:normal}
+ .tray-host .product b{overflow-wrap:anywhere}
+ .tray-host .product svg{flex-shrink:0}
+ .shelf-row .slot{min-height:48px}
+ .shelf-row .slot svg{height:25px}
+ .actions button{min-height:44px}
+}
