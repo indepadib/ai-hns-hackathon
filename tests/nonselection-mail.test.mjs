@@ -42,3 +42,10 @@ test('Bulk nonselection protects selected, invited, confirmed, existing passes a
   assert.equal((await f.call('rh-nonselection-bulk-mark',{items:[{id:f.id,status:'interview'}],confirm:true})).value.results[0].state,'protected');assert.equal(f.row().status,'interview');
  }
 });
+
+test('Premium nonselection HTML matches H&S brand, clearly communicates decision and next edition without an invitation',()=>{
+ const mail=nonselectionMail({name:'Camille <Test> & Co'});
+ assert.match(mail.html,/H&amp;S INVEST/);assert.match(mail.html,/#12365d/);assert.match(mail.html,/role="presentation"/);assert.match(mail.html,/Bonjour Camille &lt;Test&gt; &amp; Co,/);
+ assert.match(mail.html,/n’a malheureusement pas été retenue/);assert.match(mail.text,/deuxième hackathon/);assert.match(mail.html,/ÉDITION 02/);
+ assert.doesNotMatch(mail.html,/<script|<img|<a href|QR code|Confirmer ma présence/i);assert.match(nonselectionMail({}).text,/^Bonjour,/);
+});
