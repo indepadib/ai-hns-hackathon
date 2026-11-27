@@ -34,7 +34,7 @@ try{
    }}
    await route.fulfill({status,json:out});
   });
-  await page.addInitScript(()=>{if(window.top!==window.self)return;sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
+  await page.addInitScript(()=>{if(window.top!==window.self||sessionStorage.getItem('hns_mission_token'))return;sessionStorage.setItem('hns_mission_token','synthetic-admin');sessionStorage.setItem('hns_mission_role','admin')});
   await page.goto(base+'/mission-control/');
   const shortcuts=page.getByRole('navigation',{name:'Raccourcis organisation'});await shortcuts.waitFor();
   assert.equal(await shortcuts.getByRole('button').count(),5);
@@ -69,9 +69,11 @@ try{
   await page.goto(base+'/invites/#'+inviteToken);await page.getByRole('button',{name:'Je confirme ma présence'}).click();await page.getByText('Votre participation est confirmée.').waitFor();assert.equal(guests[0].rsvp,'confirmed');await page.getByAltText('QR code personnel de l’invité').waitFor();await page.getByText('7 minutes · 4 slides recommandées').waitFor();assert.equal(await page.locator('.materials').count(),0);assert.doesNotMatch(await page.locator('#invite').innerText(),/transmettez votre support|avant vendredi 27 novembre/i);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest RSVP overflow');assert.deepEqual(errors,[]);
   await page.screenshot({path:'browser-review/guest-rsvp-'+viewport.width+'.png',fullPage:true});
   await page.getByRole('button',{name:'Accéder à Mission Control',exact:true}).click();
-  await page.getByRole('heading',{name:'La journée en direct.'}).waitFor();
+  await page.getByRole('heading',{name:'La journée en direct.'}).waitFor();assert.equal(await page.evaluate(()=>sessionStorage.getItem('hns_mission_token')),'synthetic-guest-session');
   await page.getByRole('button',{name:'Consulter et évaluer'}).click();
   await page.getByRole('button',{name:'Noter ce candidat'}).click();
+  await page.locator('.guest-live-eval input[type=number]').first().waitFor();
+  assert.equal(await page.locator('.guest-live-eval input[type=number]').count(),5);
   for(const input of await page.locator('.guest-live-eval input[type=number]').all())await input.fill('80');
   await page.locator('.guest-live-eval textarea').fill('Observation fictive');
   await page.getByRole('button',{name:'Enregistrer mon évaluation'}).click();
