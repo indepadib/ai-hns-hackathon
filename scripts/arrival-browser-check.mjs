@@ -70,12 +70,15 @@ try{
   });
   await page.addInitScript(()=>{sessionStorage.setItem('hns_mission_token','synthetic-participant');sessionStorage.setItem('hns_mission_role','participant')});
   await page.goto(base+'/mission-control/');
-  await page.locator('.flight-plan').waitFor();
+  await page.locator('.flight-plan').waitFor();assert.equal(await page.locator('.agenda-grid .agenda-item').count(),10);assert.equal(await page.locator('.studio-help a[href="/mission-control/play/"]').count(),0);assert.equal(await page.locator(viewport.width<=800?'.mobile-play-link':'.studio-play-shortcut').isVisible(),true);
   // Exercise the actual participant pages, not only the public discovery screen.
   assert.equal(await page.locator('.day-j-card').isVisible(),true);
   async function openMission(id){
    if(viewport.width<=800&&!(await page.locator('[data-mission="'+id+'"]').isVisible()))await page.locator('#mobile-mission-toggle').click();
    await page.locator('[data-mission="'+id+'"]').click();
+   const play=page.locator(viewport.width<=800?'.mobile-play-link':'.studio-play-shortcut');
+   assert.equal(await play.isVisible(),true,'Play Lab shortcut visible on '+id);
+   assert.equal(await play.getAttribute('target'),'_blank');assert.match(await play.getAttribute('rel'),/noopener/);
   }
   await openMission('checkin');await page.getByRole('heading',{name:'Votre accueil, sans temps perdu'}).waitFor();
   await page.locator('.day-j-card input[type="checkbox"]').first().check();assert.match(await page.locator('.day-j-card .dayj-tile').first().innerText(),/1 \/ 6/);const playLink=page.locator('.day-j-card a[href="/mission-control/play/"]');assert.equal(await playLink.getAttribute('target'),'_blank');const beforeVersion=version;const gamePromise=context.waitForEvent('page');await playLink.click();const game=await gamePromise;await game.waitForLoadState('domcontentloaded');await game.locator('.hub-hero').waitFor();assert.equal(await game.evaluate(()=>window.opener===null),true);assert.equal(await game.evaluate(()=>sessionStorage.getItem('hns_mission_token')),null);await game.close();assert.equal(await page.locator('.day-j-card input[type="checkbox"]').first().isChecked(),true);assert.equal(version,beforeVersion);
