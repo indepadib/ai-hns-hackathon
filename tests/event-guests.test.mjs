@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {guestAction,guestToken,guestMail,validateGuest,guestQrPayload,guestQrId,scanGuestPass} from '../lib/event-guests.mjs';
+import {guestAction,guestToken,guestMail,validateGuest,guestQrPayload,guestQrId,scanGuestPass,juryGuestEligible,juryGuestExpiry} from '../lib/event-guests.mjs';
 function fixture(guestPlan,guestContacts){
  const records=new Map();let sequence=0,sends=0;
  const db={list:async({prefix})=>({blobs:[...records.keys()].filter(k=>k.startsWith(prefix)).map(key=>({key}))}),get:async k=>structuredClone(records.get(k)?.data??null),getWithMetadata:async k=>structuredClone(records.get(k)??null),setJSON:async(k,data,opts={})=>{const old=records.get(k);if(opts.onlyIfNew&&old||opts.onlyIfMatch&&opts.onlyIfMatch!==old?.etag)return{modified:false};const etag=String(++sequence);records.set(k,{data:structuredClone(data),etag});return{modified:true,etag}}};
@@ -124,4 +124,18 @@ test('Premium guest mail is personalized, includes the published indicative agen
  assert.doesNotMatch(leadership.html,/Préparation de votre intervention/);
  assert.doesNotMatch(leadership.html,/Votre créneau :/);
  for(const content of [mail.text,mail.html,leadership.text,leadership.html])assert.doesNotMatch(content,/transmettez votre support|avant vendredi 27 novembre|Votre support<\/strong>/i);
+});
+
+test('Only an accepted and confirmed named jury invitation can authorize a jury session',async()=>{
+ const {call,secret}=fixture();const created=await call('guest-create',{guest:{name:'Jury fictif',email:'jury@example.invalid',role:'jury'}});
+ const {id,version}=created.value.guest,token=guestToken(id,secret);
+ assert.match(guestMail(created.value.guest,secret).text,/Aucun code supplémentaire requis/);
+ assert.equal(juryGuestEligible(created.value.guest,juryGuestExpiry-1),false);
+ const sent=await call('guest-send',{id,version,confirm:true});assert.equal(sent.status,200);
+ assert.equal((await call('guest-rsvp-read',{token},null)).value.guest.juryAccess,false);
+ const confirmed=await call('guest-rsvp',{token,response:'confirmed'},null);assert.equal(confirmed.value.guest.juryAccess,true);
+ const row=(await call('guest-list')).value.guests[0];assert.equal(juryGuestEligible(row,juryGuestExpiry-1),true);
+ for(const patch of [{role:'guest'},{role:'mentor'},{role:'business'},{rsvp:'declined'},{mailStatus:'draft'},{revokedAt:'2026-11-27'}])assert.equal(juryGuestEligible({...row,...patch},juryGuestExpiry-1),false);
+ assert.equal(juryGuestEligible(row,juryGuestExpiry),false);
+ await call('guest-revoke',{id,version:row.version,confirm:true});assert.equal((await call('guest-rsvp-read',{token},null)).status,404);
 });
