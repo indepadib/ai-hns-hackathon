@@ -8,15 +8,19 @@ try{
  for(const viewport of [{width:390,height:844},{width:1440,height:900}]){
   const context=await browser.newContext({viewport}),page=await context.newPage(),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
-  const guests=[];let sends=0;const id='a'.repeat(32),inviteToken=id+'.'+'b'.repeat(64);
+  const guests=[];let sends=0,guestSession=false,evaluation=null;const id='a'.repeat(32),inviteToken=id+'.'+'b'.repeat(64);
   await page.route('**/api/mission',async route=>{
    const req=route.request();let out={},status=200;
    if(req.method()==='GET')out={service:'hns-mission'};
    else{const body=req.postDataJSON();switch(body.action){
-    case 'me':out={role:'admin'};break;
+    case 'me':out={role:guestSession?'guest':'admin'};break;
+    case 'guest-studio-login':assert.equal(body.token,inviteToken);assert.equal(guests[0].rsvp,'confirmed');guestSession=true;out={role:'guest',token:'synthetic-guest-session'};break;
+    case 'team-inspect':out={alias:'Projet fictif',members:[{id:'c'.repeat(32),alias:'Candidat fictif'}],workspace:{problem:{summary:'Exemple de problème'}},submitted:false};break;
+    case 'guest-evaluation-read':out={evaluation};break;
+    case 'guest-evaluation-save':assert.equal(body.id,'c'.repeat(32));assert.equal(body.scores.problem,80);evaluation={scores:body.scores,total:80,updatedAt:'2026-11-28T11:00:00Z',comment:body.comment};out={evaluation};break;
     case 'staff-list':out={participants:[],sendEnabled:false};break;
-    case 'schedule':out={now:Date.now(),stages:[]};break;
-    case 'team-dashboard':out={teams:[]};break;
+    case 'schedule':out={now:Date.now(),stages:guestSession?[{id:'checkin',label:'Accueil',opensAt:Date.now(),unlocked:true}]:[]};break;
+    case 'team-dashboard':out={teams:guestSession?[{id:'d'.repeat(32),alias:'Projet fictif',members:['Candidat fictif'],signals:{documented:2,total:7},submitted:false}]:[]};break;
     case 'guest-list':out={guests,sendEnabled:true};break;
     case 'guest-create':guests.push({id,...body.guest,version:0,mailStatus:'draft',rsvp:'pending'});out={guest:guests[0]};status=201;break;
     case 'guest-preview':out={guest:guests[0],mail:guestMail(guests[0],'S'.repeat(40))};break;
@@ -25,7 +29,7 @@ try{
       assert.equal(body.token,inviteToken);
       if(body.action==='guest-rsvp')guests[0].rsvp=body.response;
       if(body.action==='guest-materials')guests[0].materials=body.materials;
-      out={guest:{name:guests[0].name,role:'Représentant de verticale · Business Talk',vertical:'One Retail',session:guests[0].session,slot:guests[0].slot,rsvp:guests[0].rsvp,...(guests[0].rsvp==='confirmed'?{passCode:'HNSG:'+'A'.repeat(32)+':'+'B'.repeat(32),qrCode:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII='}:{}),canShareMaterials:true,materials:guests[0].materials,brief:{duration:'7 minutes',format:'4 slides recommandées',items:['Notre métier','Notre réalité terrain','Trois problématiques','Notre ambition'],note:'Exemples concrets'}}};break;
+      out={guest:{name:guests[0].name,role:'Représentant de verticale · Business Talk',vertical:'One Retail',session:guests[0].session,slot:guests[0].slot,rsvp:guests[0].rsvp,...(guests[0].rsvp==='confirmed'?{passCode:'HNSG:'+'A'.repeat(32)+':'+'B'.repeat(32),qrCode:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII='}:{}),studioAccess:guests[0].rsvp==='confirmed',canShareMaterials:true,materials:guests[0].materials,brief:{duration:'7 minutes',format:'4 slides recommandées',items:['Notre métier','Notre réalité terrain','Trois problématiques','Notre ambition'],note:'Exemples concrets'}}};break;
     default:status=400;out={error:'Unexpected synthetic request '+body.action};
    }}
    await route.fulfill({status,json:out});
@@ -63,6 +67,16 @@ try{
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest center overflow');
   await page.screenshot({path:'browser-review/guest-center-'+viewport.width+'.png',fullPage:true});
   await page.goto(base+'/invites/#'+inviteToken);await page.getByRole('button',{name:'Je confirme ma présence'}).click();await page.getByText('Votre participation est confirmée.').waitFor();assert.equal(guests[0].rsvp,'confirmed');await page.getByAltText('QR code personnel de l’invité').waitFor();await page.getByText('7 minutes · 4 slides recommandées').waitFor();assert.equal(await page.locator('.materials').count(),0);assert.doesNotMatch(await page.locator('#invite').innerText(),/transmettez votre support|avant vendredi 27 novembre/i);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest RSVP overflow');assert.deepEqual(errors,[]);
-  await page.screenshot({path:'browser-review/guest-rsvp-'+viewport.width+'.png',fullPage:true});await context.close();console.log('Guest invitation and RSVP verified:',viewport.width,'px');
+  await page.screenshot({path:'browser-review/guest-rsvp-'+viewport.width+'.png',fullPage:true});
+  await page.getByRole('button',{name:'Accéder à Mission Control',exact:true}).click();
+  await page.getByRole('heading',{name:'La journée en direct.'}).waitFor();
+  await page.getByRole('button',{name:'Consulter et évaluer'}).click();
+  await page.getByRole('button',{name:'Noter ce candidat'}).click();
+  for(const input of await page.locator('.guest-live-eval input[type=number]').all())await input.fill('80');
+  await page.locator('.guest-live-eval textarea').fill('Observation fictive');
+  await page.getByRole('button',{name:'Enregistrer mon évaluation'}).click();
+  await page.getByText('Évaluation enregistrée · 80/100.',{exact:true}).waitFor();assert.equal(evaluation.comment,'Observation fictive');
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true,'Guest live overflow');assert.deepEqual(errors,[]);
+  await context.close();console.log('Guest invitation and RSVP verified:',viewport.width,'px');
  }
 }finally{await browser.close()}
