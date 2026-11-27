@@ -1,6 +1,6 @@
 import {nonselectionAction} from '../../lib/nonselection-mail.mjs';
 import {scoutAction} from '../../lib/talent-scout.mjs';
-import {guestAction,scanGuestPass,guestArrivalCount} from '../../lib/event-guests.mjs';
+import {guestAction,scanGuestPass,guestArrivalCount,verifyGuestToken,guestKey,juryGuestEligible,juryGuestExpiry,guestStudioEligible} from '../../lib/event-guests.mjs';
 import {finalResults} from '../../lib/final-results.mjs';
 import QRCode from 'qrcode';
 import {marker as restoreMarker} from '../../lib/restore-confirmed.mjs';
@@ -28,7 +28,7 @@ const hash=value=>createHash('sha256').update(String(value)).digest('hex');
 const equal=(a,b)=>{const aa=Buffer.from(String(a)),bb=Buffer.from(String(b));return aa.length===bb.length&&timingSafeEqual(aa,bb)};
 const encode=data=>Buffer.from(JSON.stringify(data)).toString('base64url');
 const sign=(data,secret)=>{const payload=encode(data);return payload+'.'+createHmac('sha256',secret).update(payload).digest('base64url')};
-const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return null;const expected=createHmac('sha256',secret).update(p).digest('base64url');if(!equal(expected,s))return null;const data=JSON.parse(Buffer.from(p,'base64url').toString('utf8'));if(!data||!Number.isFinite(data.exp)||data.exp<Date.now())return null;if(!['admin','rh','jury','participant','mentor'].includes(data.role))return null;return data}catch{return null}};
+const verify=(token,secret)=>{try{const[p,s]=token.split('.');if(!p||!s)return null;const expected=createHmac('sha256',secret).update(p).digest('base64url');if(!equal(expected,s))return null;const data=JSON.parse(Buffer.from(p,'base64url').toString('utf8'));if(!data||!Number.isFinite(data.exp)||data.exp<Date.now())return null;if(!['admin','rh','jury','participant','mentor','guest'].includes(data.role))return null;return data}catch{return null}};
 const validId=id=>typeof id==='string'&&/^[a-f0-9]{32}$/.test(id);
 const participantKey=id=>'participant-'+id;
 const within=(s,max)=>String(s??'').trim().slice(0,max);
@@ -85,6 +85,14 @@ export default async function handler(request,context){
  }
  try{
  const db=store();
+  if(['guest-jury-login','guest-studio-login'].includes(action)){
+   if(!isLive(request,context))return fail('Accès réservé au site officiel',403);
+   const guestId=verifyGuestToken(body.token,secret);
+   const row=guestId?await db.get(guestKey(guestId),{type:'json'}):null;
+   const role=action==='guest-jury-login'?'jury':'guest';
+   if(!(role==='jury'?juryGuestEligible(row):guestStudioEligible(row)))return fail('Invitation non confirmée, révoquée ou expirée',403);
+   return json({role,token:sign({role,guestId,exp:Math.min(Date.now()+4*60*60*1000,juryGuestExpiry)},secret)});
+  }
   if(['gmail-connect','gmail-status','gmail-test'].includes(action)){
    if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
    const cfg=oauthConfig(readEnv);if(!cfg)return fail('Configuration OAuth manquante',503);
@@ -172,6 +180,13 @@ export default async function handler(request,context){
   }
   const raw=String(request.headers.get('authorization')||''),token=raw.replace(/^Bearer\s+/i,'');
   let auth=verify(token,secret);
+  if(auth?.guestId){
+   const g=validId(auth.guestId)&&isLive(request,context)?await db.get(guestKey(auth.guestId),{type:'json'}):null;
+   if(auth.role==='jury'?!juryGuestEligible(g):auth.role!=='guest'||!guestStudioEligible(g))return fail('Session invitée non autorisée ou expirée',401);
+   const allowed=auth.role==='jury'?['me','jury-list','jury-dossier','jury-holdout-inputs','jury-holdout-status','jury-holdout-score','jury-score']:['me','schedule','team-dashboard','team-inspect','guest-evaluation-read','guest-evaluation-save'];
+   if(!allowed.includes(action))return fail('Action non autorisée pour cet accès',403);
+  }
+  if(auth?.role==='guest'&&!auth.guestId)return fail('Invitation nominative requise',403);
   if(action.startsWith('scout-')){if(!isLive(request,context))return fail('Espace terrain réservé au site officiel',403);const out=await scoutAction({action,body,auth,db,secret,listParticipants,recruitmentCandidate,sign,renderQR:code=>QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320})});return json(out.value,out.status)}
   if(auth?.role==='mentor')return fail('Accès limité à Talent Scout',403);
   if(action==='rh-pass-preview'||action==='rh-pass-send'){
@@ -266,7 +281,7 @@ export default async function handler(request,context){
    return json({generatedAt:new Date().toISOString(),...finalResults(projects,people)});
   }
   if(action==='team-dashboard'){
-   if(!['admin','jury'].includes(auth.role))return fail('Accès interdit',403);
+   if(!['admin','jury','guest'].includes(auth.role))return fail('Accès interdit',403);
    const people=await listParticipants(db),teams=[],assigned=new Set();
    let cursor;
    do{
@@ -283,7 +298,7 @@ export default async function handler(request,context){
     const rec=await db.get(participantKey(p.id),{type:'json'});
     teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:teamSignals(rec?.workspace).documented,signals:teamSignals(rec?.workspace),updatedAt:rec?.updatedAt||null,challenge:rec?.workspace?.challenge?.id||null});
    }
-   return json({teams:teams.filter(t=>auth.role==='admin'||t.submitted).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
+   return json({teams:teams.filter(t=>auth.role!=='jury'||t.submitted).map(t=>auth.role==='guest'?{...t,score:null}:t).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
   if(['talent-directory','talent-profile','talent-observe','talent-followup','talent-remove-note'].includes(action)){
    if(auth.role!=='admin')return fail('Accès administrateur requis',403);
@@ -316,11 +331,35 @@ export default async function handler(request,context){
    return fail('Modification concurrente. Actualisez le profil.',409,'VERSION_CONFLICT');
   }
   if(action==='team-inspect'){
-   if(auth.role!=='admin')return fail('Accès administrateur requis',403);
+   if(!['admin','guest'].includes(auth.role))return fail('Accès organisation ou invité requis',403);
    if(!validId(body.id))return fail('Identifiant invalide');
    const team=await db.get('team-'+body.id,{type:'json'}),rec=team||await db.get(participantKey(body.id),{type:'json'});
    if(!rec||(!team&&rec.status!=='active'))return fail('Dossier indisponible',404);
-   const memberIds=team&&Array.isArray(team.members)?team.members:[body.id];const members=(await Promise.all(memberIds.filter(validId).map(async id=>({id,rec:await db.get(participantKey(id),{type:'json'})})))).filter(x=>x.rec?.status==='active'&&x.rec?.checkedInAt).map(x=>({id:x.id,alias:x.rec.alias}));return json({alias:rec.alias,members,workspace:rec.workspace||{},signals:teamSignals(rec.workspace),submitted:!!rec.submitted,score:rec.score||null});
+   const memberIds=team&&Array.isArray(team.members)?team.members:[body.id];const members=(await Promise.all(memberIds.filter(validId).map(async id=>({id,rec:await db.get(participantKey(id),{type:'json'})})))).filter(x=>x.rec?.status==='active'&&x.rec?.checkedInAt).map(x=>({id:x.id,alias:x.rec.alias}));return json({alias:rec.alias,members,workspace:rec.workspace||{},signals:teamSignals(rec.workspace),submitted:!!rec.submitted,score:auth.role==='guest'?null:rec.score||null});
+  }
+  if(['guest-evaluation-read','guest-evaluation-save'].includes(action)){
+   if(auth.role!=='guest'||!validId(auth.guestId)||!validId(body.id))return fail('Accès invité nominatif requis',403);
+   const person=await db.get(participantKey(body.id),{type:'json'});
+   if(!person||person.status!=='active'||!person.checkedInAt)return fail('Participant présent introuvable',404);
+   const key='guest-evaluation-v1-'+auth.guestId+'-'+body.id;
+   if(action==='guest-evaluation-read')return json({evaluation:await db.get(key,{type:'json'})||null});
+   const values=body.scores;
+   if(!values||!scoresNames.every(k=>Number.isInteger(values[k])&&values[k]>=0&&values[k]<=100)||typeof body.comment!=='string'||body.comment.length>1500)return fail('Évaluation invalide : notes entières de 0 à 100 et commentaire de 1500 caractères maximum');
+   const meta=await db.getWithMetadata(key,{type:'json'}),previous=meta?.data;
+   if((body.expectedAt||null)!==(previous?.updatedAt||null))return fail('Évaluation actualisée. Rechargez avant de modifier.',409);
+   const evaluation={guestId:auth.guestId,participantId:body.id,scores:Object.fromEntries(scoresNames.map(k=>[k,values[k]])),comment:body.comment.trim(),total:Math.round((values.problem*.2+values.design*.2+values.build*.25+values.test*.2+values.demo*.15)*100)/100,updatedAt:new Date().toISOString()};
+   const write=await db.setJSON(key,evaluation,meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
+   if(!write?.modified)return fail('Évaluation modifiée simultanément. Rechargez.',409);
+   return json({evaluation});
+  }
+  if(action==='guest-evaluation-report'){
+   if(auth.role!=='admin')return fail('Accès organisation requis',403);
+   const evaluations=[];let cursor;
+   do{const p=await db.list({prefix:'guest-evaluation-v1-',...(cursor?{cursor}:{})});for(let i=0;i<p.blobs.length;i+=15){const batch=await Promise.all(p.blobs.slice(i,i+15).map(e=>db.get(e.key,{type:'json'})));evaluations.push(...batch.filter(Boolean))}cursor=p.cursor}while(cursor&&evaluations.length<10000);
+   const guestNames=new Map(),candidateNames=new Map();
+   for(const id of new Set(evaluations.map(e=>e.guestId))){const g=await db.get(guestKey(id),{type:'json'});guestNames.set(id,g?.name||'Invité')}
+   for(const id of new Set(evaluations.map(e=>e.participantId))){const p=await db.get(participantKey(id),{type:'json'});candidateNames.set(id,p?.alias||'Participant')}
+   return json({evaluations:evaluations.map(e=>({...e,guest:guestNames.get(e.guestId),candidate:candidateNames.get(e.participantId)}))});
   }
   if(action==='staff-list'){
    if(!['admin','rh'].includes(auth.role))return fail('Accès RH requis',403);
