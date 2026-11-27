@@ -1,6 +1,6 @@
 import {nonselectionAction} from '../../lib/nonselection-mail.mjs';
 import {scoutAction} from '../../lib/talent-scout.mjs';
-import {guestAction,scanGuestPass,guestArrivalCount} from '../../lib/event-guests.mjs';
+import {guestAction,scanGuestPass,guestArrivalCount,verifyGuestToken,guestKey,juryGuestEligible,juryGuestExpiry} from '../../lib/event-guests.mjs';
 import {finalResults} from '../../lib/final-results.mjs';
 import QRCode from 'qrcode';
 import {marker as restoreMarker} from '../../lib/restore-confirmed.mjs';
@@ -85,6 +85,13 @@ export default async function handler(request,context){
  }
  try{
  const db=store();
+  if(action==='guest-jury-login'){
+   if(!isLive(request,context))return fail('Accès jury réservé au site officiel',403);
+   const guestId=verifyGuestToken(body.token,secret);
+   const row=guestId?await db.get(guestKey(guestId),{type:'json'}):null;
+   if(!juryGuestEligible(row))return fail('Invitation jury non confirmée, révoquée ou expirée',403);
+   return json({role:'jury',token:sign({role:'jury',guestId,exp:Math.min(Date.now()+4*60*60*1000,juryGuestExpiry)},secret)});
+  }
   if(['gmail-connect','gmail-status','gmail-test'].includes(action)){
    if(!isLive(request,context)||!isRecruitmentAdmin(request))return fail('Accès RH requis',403);
    const cfg=oauthConfig(readEnv);if(!cfg)return fail('Configuration OAuth manquante',503);
@@ -172,6 +179,10 @@ export default async function handler(request,context){
   }
   const raw=String(request.headers.get('authorization')||''),token=raw.replace(/^Bearer\s+/i,'');
   let auth=verify(token,secret);
+  if(auth?.guestId){
+   if(auth.role!=='jury'||!validId(auth.guestId)||!isLive(request,context)||!juryGuestEligible(await db.get(guestKey(auth.guestId),{type:'json'})))return fail('Session jury non autorisée ou expirée',401);
+   if(!['me','jury-list','jury-dossier','jury-holdout-inputs','jury-holdout-score','jury-score'].includes(action))return fail('Accès limité au jury',403);
+  }
   if(action.startsWith('scout-')){if(!isLive(request,context))return fail('Espace terrain réservé au site officiel',403);const out=await scoutAction({action,body,auth,db,secret,listParticipants,recruitmentCandidate,sign,renderQR:code=>QRCode.toDataURL(code,{errorCorrectionLevel:'M',margin:4,width:320})});return json(out.value,out.status)}
   if(auth?.role==='mentor')return fail('Accès limité à Talent Scout',403);
   if(action==='rh-pass-preview'||action==='rh-pass-send'){
