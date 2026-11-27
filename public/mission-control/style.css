@@ -224,3 +224,5 @@ body:has(.staff-workspace,.jury-workspace) .hero>p:last-child{display:none}
 @media(max-width:640px){.home-agenda{padding:15px}.agenda-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.agenda-item{padding:7px;gap:5px;font-size:11px;min-height:44px}.agenda-title{align-items:start}.agenda-title h3{font-size:17px}.home-play{margin:0 12px 14px;grid-template-columns:1fr auto;padding:12px;gap:8px}.home-play-art{display:none}.home-play .button{min-height:44px}.studio-support-grid{grid-template-columns:1fr}}
 
 .vertical-market-card.vertical-free-card{border:1px dashed #83a6c8;background:#edf5fc}.vertical-free-card strong{color:#12365d}#custom-challenge-form{scroll-margin-top:90px}
+
+@media(max-width:800px){.studio-mobile-nav>.mobile-studio-actions{display:flex;align-items:center;gap:5px;flex-shrink:0}.studio-mobile-nav .mobile-studio-actions .button{font-size:11px;padding:8px;min-height:44px;white-space:nowrap}.studio-mobile-nav{padding:10px;gap:6px}.studio-mobile-nav .mobile-play-link{text-decoration:none;display:flex;align-items:center}.studio-mobile-nav #mobile-save-status{font-size:10px;overflow-wrap:anywhere}}
