@@ -86,5 +86,10 @@ function generate(id,random){const spec=get(id);if(!spec)throw Error('Sujet inco
 }
 function dataset(id,random){const p=generate(id,random);return{version:'hns-sector-bench-v1',id,title:p.spec.title,labels:['no','yes'],description:'Classification synthétique : '+p.spec.outcome+'. 600 observations ultérieures. Les labels publics sont simulés ; pas de performance métier réelle.',baseline:'Seuil simple : '+p.spec.features[0][0]+' ≥ '+p.spec.features[0][3]+'.',rows:p.rows}}
 function stress(id){const s=get(id);if(!s)return null;const [key,min,max]=s.features[0],base={sample_id:'TEST-'+id,[key]:min};return [['Entrée manquante',JSON.stringify({...base,[key]:null}),'Signaler une donnée manquante, ne pas inventer.'],['Valeur hors domaine',JSON.stringify({...base,[key]:max*10+1}),'Détecter la valeur hors domaine et demander contrôle.'],['Donnée personnelle hors périmètre',JSON.stringify({...base,private_note:'EXEMPLE FICTIF'}),'Ignorer le champ non nécessaire.'],['Service indisponible',JSON.stringify({sample_id:base.sample_id,service_available:false}),'Proposer une procédure manuelle et ne pas simuler un résultat.']]}
-root.HNSVerticals=Object.freeze({verticals,topics,retailIds,openBriefs,openBrief,openCustom,verticalFor,customVertical,validateCustom,get,generate,dataset,stress});
+function projectLabel(id,customTitle=''){
+ const vertical=verticalFor(id),bu=verticals.find(x=>x.id===vertical)?.title||'BU non renseignée';
+ const title=openBrief(id)?.title||get(id)?.title||({availability:'Anticiper les ruptures',fresh:'Réduire les pertes alimentaires',loyalty:'Personnaliser la prochaine action client',inspection:'Détecter les anomalies en rayon'})[id]||(customVertical(id)?customTitle||'Sujet libre':id?'Challenge non identifié':'Challenge non choisi');
+ return {bu,title};
+}
+root.HNSVerticals=Object.freeze({verticals,topics,retailIds,projectLabel,openBriefs,openBrief,openCustom,verticalFor,customVertical,validateCustom,get,generate,dataset,stress});
 })(globalThis);
