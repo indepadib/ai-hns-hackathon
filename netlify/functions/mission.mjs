@@ -13,7 +13,7 @@ import OpenAI from 'openai';
 import {getStore} from '@netlify/blobs';
 import {createHmac,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 
-import {teamSignals} from '../../lib/team-signals.mjs';
+import {teamSignals,projectPreview} from '../../lib/team-signals.mjs';
 import {validateObservation,validateFollowup,summarize as summarizeTalent} from '../../lib/talent-observations.mjs';
 import {privateTables,privateDataset,inputPayload,inputDigest,evaluatePrivate,protocol as privateProtocol} from '../../lib/private-benchmark.mjs';
 let privateCache=null;
@@ -54,7 +54,7 @@ async function listParticipants(db){
    const rows=await Promise.all(batch.map(async entry=>{
     const id=entry.key.slice(12),[rec,mail]=await Promise.all([db.get(entry.key,{type:'json'}),db.get('invitation-mail-'+id,{type:'json'})]);
     if(!rec)return null;
-    return {id,alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:mail?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null};
+    return {id,alias:rec.alias,team:rec.team||'',teamSize:rec.teamSize||1,status:rec.status||'active',submitted:!!rec.submitted,checkedInAt:rec.checkedInAt||null,rsvp:rec.rsvp||'pending',mailStatus:mail?.state||'not_sent',submittedAt:rec.submittedAt||null,score:rec.score||null,preview:projectPreview(rec.workspace)};
    }));out.push(...rows.filter(Boolean));
   }cursor=page.cursor;
  }while(cursor&&out.length<1000);
@@ -290,13 +290,13 @@ export default async function handler(request,context){
      const t=await db.get(entry.key,{type:'json'});
      if(!t||!Array.isArray(t.members))continue;
      t.members.forEach(id=>assigned.add(id));
-     teams.push({id:entry.key.slice(5),alias:t.alias,members:t.members.map(id=>people.find(p=>p.id===id)?.alias||id),submitted:!!t.submitted,submittedAt:t.submittedAt||null,score:t.score||null,progress:teamSignals(t.workspace).documented,signals:teamSignals(t.workspace),updatedAt:t.updatedAt||null,challenge:t.workspace?.challenge?.id||null});
+     teams.push({id:entry.key.slice(5),alias:t.alias,members:t.members.map(id=>people.find(p=>p.id===id)?.alias||id),submitted:!!t.submitted,submittedAt:t.submittedAt||null,score:t.score||null,progress:teamSignals(t.workspace).documented,signals:teamSignals(t.workspace),updatedAt:t.updatedAt||null,challenge:t.workspace?.challenge?.id||null,preview:projectPreview(t.workspace)});
     }
     cursor=page.cursor;
    }while(cursor);
    for(const p of people.filter(p=>p.status==='active'&&!assigned.has(p.id))){
     const rec=await db.get(participantKey(p.id),{type:'json'});
-    teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:teamSignals(rec?.workspace).documented,signals:teamSignals(rec?.workspace),updatedAt:rec?.updatedAt||null,challenge:rec?.workspace?.challenge?.id||null});
+    teams.push({id:p.id,alias:p.alias,members:[p.alias],submitted:p.submitted,submittedAt:p.submittedAt,score:p.score,progress:teamSignals(rec?.workspace).documented,signals:teamSignals(rec?.workspace),updatedAt:rec?.updatedAt||null,challenge:rec?.workspace?.challenge?.id||null,preview:projectPreview(rec?.workspace)});
    }
    return json({teams:teams.filter(t=>auth.role!=='jury'||t.submitted).map(t=>auth.role==='guest'?{...t,score:null}:t).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
@@ -368,9 +368,9 @@ export default async function handler(request,context){
   if(action==='jury-list'){
    if(auth.role!=='jury')return fail('Accès jury requis',403);
    const people=await listParticipants(db);
-   const participants=people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score}));
+   const participants=people.filter(p=>p.submitted).map(p=>({id:p.id,alias:p.alias,team:p.team,submittedAt:p.submittedAt,score:p.score,preview:p.preview}));
    let cursor;const assigned=new Set();
-   do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const t=await db.get(entry.key,{type:'json'});if(!t)continue;(t.members||[]).forEach(id=>assigned.add(id));if(t.submitted)participants.push({id:entry.key.slice(5),alias:t.alias,team:(t.members||[]).map(id=>people.find(p=>p.id===id)?.alias||id).join(' / '),submittedAt:t.submittedAt,score:t.score||null})}cursor=page.cursor}while(cursor);
+   do{const page=await db.list({prefix:'team-',...(cursor?{cursor}:{})});for(const entry of page.blobs){const t=await db.get(entry.key,{type:'json'});if(!t)continue;(t.members||[]).forEach(id=>assigned.add(id));if(t.submitted)participants.push({id:entry.key.slice(5),alias:t.alias,team:(t.members||[]).map(id=>people.find(p=>p.id===id)?.alias||id).join(' / '),submittedAt:t.submittedAt,score:t.score||null,preview:projectPreview(t.workspace)})}cursor=page.cursor}while(cursor);
    return json({participants:participants.filter(p=>!assigned.has(p.id)).sort((a,b)=>(b.score?.total??-1)-(a.score?.total??-1))});
   }
   if(['invitation-email','invitation-send'].includes(action)){
