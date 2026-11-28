@@ -32,7 +32,7 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   assert.equal(org.status,200);assert.equal(staff.status,200);assert.equal(jury.status,200);
   const ot=org.data.token,rt=staff.data.token,jt=jury.data.token;
   async function stage(stage,opensAt){assert.equal((await call({action:'schedule-update',stage,opensAt},ot)).status,200)}
-  await stage('matching',0);await stage('challenge',Date.now()+3600000);await stage('problem',Date.now()+3600000);
+  await stage('matching',0);await stage('challenge',0);await stage('problem',0);await stage('submission',Date.now()+3600000);
   async function candidate(name){
    const email=name.toLowerCase().replace(/\s+/g,'-')+'@example.invalid',candidateId=createHash('sha256').update(email).digest('hex');
    await rh.setJSON(candidateId,{id:candidateId,name,email,status:'selected',history:[]});
@@ -44,7 +44,7 @@ export function getStore({name}){if(!stores.has(name))stores.set(name,new Map())
   }
   const a=await candidate('TEST ALPHA'),b=await candidate('TEST BETA'),c=await candidate('TEST GAMMA');
   // A fresh solo tab and simultaneous reciprocal choices.
-  const solo=await call({action:'load'},a.token);assert.equal(solo.data.teamId,null);
+  const solo=await call({action:'load'},a.token);assert.equal(solo.data.teamId,null);const lateMatching=await call({action:'matching-list'},a.token);assert.equal(lateMatching.data.closed,false);assert.ok(lateMatching.data.people.some(p=>p.id===b.id&&p.available));
   const matches=await Promise.all([call({action:'matching-choice',target:b.id},a.token),call({action:'matching-choice',target:a.id},b.token)]);
   assert.ok(matches.every(x=>x.status===200),JSON.stringify(matches));assert.equal(matches.filter(x=>x.data.mutual).length,1);
   const [la,lb]=await Promise.all([call({action:'load'},a.token),call({action:'load'},b.token)]);
