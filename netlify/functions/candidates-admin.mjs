@@ -3,7 +3,7 @@ import {secureTokenEqual,env,openStoreOptions,ready,candidateId,clean,validateEm
 import {triage,dataFromSubmission,statusValues} from '../../lib/recruitment/triage.mjs';
 import {normalizeCV,candidateHasCV,safeCandidateSummary} from '../../lib/recruitment/_cv.mjs';
 const response=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'}});
-const allowedActions=new Set(['set-status','note','invite','import']);
+const allowedActions=new Set(['set-status','note','invite','import','reinstate']);
 function auth(request){
  const bearer=(request.headers.get('authorization')||'').replace(/^Bearer\s+/i,'');
  return secureTokenEqual(env('HNS_ADMIN_TOKEN'),bearer);
@@ -44,6 +44,19 @@ export default async(request,context)=>{
    return response({ok:true,imported,skipped});
   }
   if(typeof body.id!=='string'||!/^[a-f0-9]{64}$/.test(body.id))return response({error:'Dossier invalide'},400);
+  if(body.action==='reinstate'){
+   const reason=clean(body.reason,500);
+   if(body.confirm!==true||reason.length<5)return response({error:'Confirmation RH et motif de réintégration obligatoires.'},422);
+   const result=await modify(store,body.id,r=>{
+    if(r.status!=='rejected')throw Object.assign(Error('Seul un candidat non retenu peut être réintégré.'),{rhProtected:true});
+    if(r.nonselection?.state==='sending')throw Object.assign(Error('Un email est en cours d’envoi. Actualisez avant de réintégrer.'),{rhProtected:true});
+    const at=new Date().toISOString(),status=r.invitedAt?'invited':'selected';
+    return {...r,status,updatedAt:at,history:[...(r.history||[]),{at,action:'reinstate',from:'rejected',value:status,reason,previousCommunication:r.nonselection?.state||null}].slice(-80)};
+   });
+   if(!result)return response({error:'Candidat absent'},404);
+   if(result.conflict)return response({error:'Dossier modifié simultanément. Actualisez et réessayez.'},409);
+   return response({ok:true,record:sanitize(result.record)});
+  }
   if(body.action==='set-status'){
    const status=body.status;if(!statusValues.includes(status)||['invited','confirmed'].includes(status))return response({error:'Les statuts Invité et Confirmé sont réservés au parcours invitation / participation. Utilisez Sélectionné pour valider un candidat.'},422);
    const result=await modify(store,body.id,r=>{
