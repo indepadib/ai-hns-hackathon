@@ -543,39 +543,56 @@ export default async function handler(request,context){
   const isOpen=id=>schedule.some(stage=>stage.id===id&&Date.now()>=stage.opensAt);
   if(['matching-list','matching-choice'].includes(action)&&!isOpen('matching'))return fail('Matching pas encore ouvert',403,'STAGE_LOCKED');
   if(action==='submit'&&!isOpen('submission'))return fail('Soumission pas encore ouverte',403,'STAGE_LOCKED');
+  // Event-day recovery: pairing remains available until submission, but never moves a saved solo dossier.
+  const matchable=p=>!!p&&p.status==='active'&&!!p.checkedInAt&&!p.submitted&&!(p.version||0);
   if(action==='matching-list'){
    const people=await listParticipants(db);
    const state=await db.get('matching-state-v2',{type:'json'})||{choices:{},teams:{}};
-   const closed=isOpen('challenge')||isOpen('problem')||!!rec.submitted||(rec.version||0)>0;
-   return json({people:closed?[]:people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt&&!state.teams[p.id]).map(p=>({id:p.id,alias:p.alias})),choice:state.choices[auth.id]||null,team:state.teams[auth.id]||null,closed});
+   const closed=isOpen('submission')||!matchable(rec)||!!state.workStarted?.[auth.id]||!!state.teams[auth.id];
+   const present=people.filter(p=>p.id!==auth.id&&p.status==='active'&&p.checkedInAt);
+   const candidates=await Promise.all(present.map(async p=>{const other=await db.get(participantKey(p.id),{type:'json'});const available=matchable(other)&&!state.teams[p.id]&&!state.workStarted?.[p.id];return {id:p.id,alias:p.alias,available,reason:state.teams[p.id]?'Déjà en binôme':available?'Disponible':'Dossier déjà commencé',requested:state.choices[p.id]===auth.id}}));
+   return json({people:candidates.sort((a,b)=>Number(b.available)-Number(a.available)||a.alias.localeCompare(b.alias,'fr')),choice:state.choices[auth.id]||null,team:state.teams[auth.id]||null,closed,reason:state.teams[auth.id]?'Binôme confirmé':isOpen('submission')?'Soumission ouverte':closed?'Dossier individuel déjà enregistré : demandez à l’organisation si vous souhaitez changer d’équipe.':''});
   }
   if(action==='matching-choice'){
-   // Once project work opens, preserve the established solo/team dossier.
-   if(isOpen('challenge')||isOpen('problem')||rec.submitted||(rec.version||0)>0)return fail('Matching clôturé : le dossier de travail est conservé.',409,'MATCHING_CLOSED');
+   if(isOpen('submission')||!matchable(rec))return fail('Votre dossier individuel est conservé. Contactez l’organisation pour tout changement.',409,'MATCHING_CLOSED');
    const target=body.target;
    if(target!=='solo'&&(!validId(target)||target===auth.id))return fail('Choix invalide');
-   if(!rec.checkedInAt||rec.status!=='active')return fail('Présence requise',403);
-   if(target!=='solo'){
-    const peer=await db.get(participantKey(target),{type:'json'});
-    if(!peer||peer.status!=='active'||!peer.checkedInAt||peer.submitted||(peer.version||0)>0)return fail('Participant indisponible ou dossier de travail déjà commencé',409);
-   }
    for(let attempt=0;attempt<80;attempt++){
     const meta=await db.getWithMetadata('matching-state-v2',{type:'json'});
     const state=meta?.data||{choices:{},teams:{}};
-    const choices={...state.choices},teams={...state.teams};
+    const choices={...state.choices},teams={...state.teams},workStarted={...state.workStarted};
     if(teams[auth.id]||(target!=='solo'&&teams[target]))return fail('Binôme déjà constitué',409);
+    if(workStarted[auth.id]||target!=='solo'&&workStarted[target])return fail('Dossier individuel déjà commencé',409,'MATCHING_CLOSED');
+    const own=await db.get(participantKey(auth.id),{type:'json'});
+    if(!matchable(own))return fail('Votre dossier est déjà commencé',409,'MATCHING_CLOSED');
+    if(target!=='solo'&&!matchable(await db.get(participantKey(target),{type:'json'})))return fail('Participant indisponible ou dossier déjà commencé',409);
     choices[auth.id]=target;
     let teamId=null;
     if(target!=='solo'&&choices[target]===auth.id){
      teamId=hash([auth.id,target].sort().join(':')).slice(0,32);
      teams[auth.id]=teamId;teams[target]=teamId;
     }
-    if(isOpen('challenge')||isOpen('problem'))return fail('Matching clôturé : le dossier de travail est conservé.',409,'MATCHING_CLOSED');
-    const write=await db.setJSON('matching-state-v2',{choices,teams},meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
+    if(isOpen('submission'))return fail('Soumission ouverte : matching clôturé',409,'MATCHING_CLOSED');
+    const write=await db.setJSON('matching-state-v2',{...state,choices,teams,workStarted},meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
     if(!write?.modified)continue;
     return json({choice:target,mutual:!!teamId,teamId});
    }
    return fail('Matching occupé, réessayez',409);
+  }
+  // Coordinate the first solo save with reciprocal pairing on the same CAS key.
+  // No saved solo dossier may be silently replaced by an empty team workspace.
+  if(action==='save'&&!body.teamId){
+   if(!isOpen('challenge')&&!isOpen('problem'))return fail('Dossier pas encore ouvert',403,'STAGE_LOCKED');
+   if(!body.workspace||typeof body.workspace!=='object'||Array.isArray(body.workspace)||!Number.isInteger(body.version))return fail('Dossier invalide');
+   let reserved=false;
+   for(let attempt=0;attempt<40;attempt++){
+    const meta=await db.getWithMetadata('matching-state-v2',{type:'json'}),state=meta?.data||{choices:{},teams:{}};
+    if(state.teams[auth.id])return fail('Votre binôme est confirmé. Rechargez le dossier partagé avant de poursuivre.',409,'TEAM_CHANGED');
+    if(state.workStarted?.[auth.id]){reserved=true;break}
+    const write=await db.setJSON('matching-state-v2',{...state,workStarted:{...state.workStarted,[auth.id]:true}},meta?.etag?{onlyIfMatch:meta.etag}:{onlyIfNew:true});
+    if(write?.modified){reserved=true;break}
+   }
+   if(!reserved)return fail('Enregistrement concurrent : réessayez',409,'VERSION_CONFLICT');
   }
   if(action==='load'){
    let dossier=rec,teamId=null;
