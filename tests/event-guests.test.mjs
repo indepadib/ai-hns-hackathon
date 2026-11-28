@@ -151,3 +151,15 @@ test('Every confirmed guest can access guest studio but only jury role can acces
   assert.equal(guestStudioEligible({...row,revokedAt:'2026-11-28'},juryGuestExpiry-1),false);assert.equal(guestStudioEligible({...row,rsvp:'declined'},juryGuestExpiry-1),false);
  }
 });
+
+test('Staff-confirmed arrival grants personal jury access even without prior online RSVP',async()=>{
+ const {call,secret}=fixture(),created=await call('guest-create',{guest:{name:'Jury accueil fictif',email:'arrival-jury@example.invalid',role:'jury'}});
+ const {id,version}=created.value.guest,token=guestToken(id,secret);
+ await call('guest-send',{id,version,confirm:true});
+ const row=(await call('guest-list')).value.guests[0];
+ assert.equal(row.rsvp,'pending');
+ assert.equal(juryGuestEligible({...row,checkedInAt:'2026-11-28T10:00:00+01:00'},juryGuestExpiry-1),true);
+ const result=await call('guest-checkin',{id,version:row.version,confirm:true});
+ assert.equal(result.status,200);assert.equal(result.value.guest.rsvp,'confirmed');
+ const read=await call('guest-rsvp-read',{token},null);assert.equal(read.value.guest.juryAccess,true);assert.equal(read.value.guest.studioAccess,true);
+});
